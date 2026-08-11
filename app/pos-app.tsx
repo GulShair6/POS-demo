@@ -2,126 +2,1953 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
-type Product = { id:number; name:string; sku:string; category:string; price:number; cost:number; stock:number; barcode:string|null; lowStockThreshold:number; active:boolean; color?:string; icon?:string };
-type CartLine = Product & { quantity:number };
-type Payment = { id:number; method:string; amount:number };
-type SaleLine = { id:number; productId:number; productName:string; sku:string; unitPrice:number; quantity:number; returnedQuantity:number; lineTotal:number };
-type Sale = { id:number; receiptNumber:string; employeeName:string; subtotal:number; tax:number; total:number; refundedAmount:number; status:string; createdAt:string; lines:SaleLine[]; payments:Payment[] };
-type Shift = { id:number; registerCode:string; employeeName:string; openingFloat:number; expectedCash:number; countedCash:number|null; status:string; openedAt:string; closedAt:string|null };
-type CashMovement = { id:number; type:string; amount:number; reason:string; employeeName:string; createdAt:string };
-type Customer = { id:number; name:string; email:string|null; phone:string|null; visits:number; totalSpent:number; loyaltyPoints:number; createdAt:string };
-type Employee = { id:number; name:string; email:string; role:string; active:boolean };
-type AuditLog = { id:number; actor:string; action:string; entityType:string; entityId:string; details:string; createdAt:string };
-type ReturnRecord = { id:number; receiptNumber:string; saleId:number; amount:number; method:string; reason:string; createdAt:string };
-type Summary = { netSales:number; grossSales:number; refunds:number; tax:number; transactions:number; averageOrder:number; cogs:number; grossProfit:number; tender:Record<string,number>; productSales:Record<string,{quantity:number;revenue:number}> };
-type Operations = { products:Product[]; sales:Sale[]; shifts:Shift[]; cashMovements:CashMovement[]; inventoryMovements:Array<{id:number;productId:number;type:string;quantity:number;reason:string|null;createdAt:string}>; customers:Customer[]; employees:Employee[]; auditLogs:AuditLog[]; returns:ReturnRecord[]; summary:Summary };
-type RequestFn = (path:string,body:unknown,method?:string)=>Promise<Record<string,unknown>>;
-type QueuedSale = { idempotencyKey:string; items:Array<{id:number;quantity:number}>; method:"Cash"; tendered:number; customerId?:number; employeeId:number; queuedAt:string };
-type CurrentUser = { id:number; name:string; email:string; role:string };
-type PublicConfig = { businessName:string; storeName:string; registerCode:string; currency:string; locale:string; taxRate:number };
+type Product = {
+  id: number;
+  name: string;
+  sku: string;
+  category: string;
+  price: number;
+  cost: number;
+  stock: number;
+  barcode: string | null;
+  lowStockThreshold: number;
+  active: boolean;
+  color?: string;
+  icon?: string;
+};
+type CartLine = Product & { quantity: number };
+type Payment = { id: number; method: string; amount: number };
+type SaleLine = {
+  id: number;
+  productId: number;
+  productName: string;
+  sku: string;
+  unitPrice: number;
+  quantity: number;
+  returnedQuantity: number;
+  lineTotal: number;
+};
+type Sale = {
+  id: number;
+  receiptNumber: string;
+  employeeName: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  refundedAmount: number;
+  status: string;
+  createdAt: string;
+  lines: SaleLine[];
+  payments: Payment[];
+};
+type Shift = {
+  id: number;
+  registerCode: string;
+  employeeName: string;
+  openingFloat: number;
+  expectedCash: number;
+  countedCash: number | null;
+  status: string;
+  openedAt: string;
+  closedAt: string | null;
+};
+type CashMovement = {
+  id: number;
+  type: string;
+  amount: number;
+  reason: string;
+  employeeName: string;
+  createdAt: string;
+};
+type Customer = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  visits: number;
+  totalSpent: number;
+  loyaltyPoints: number;
+  createdAt: string;
+};
+type Employee = { id: number; name: string; email: string; role: string; active: boolean };
+type AuditLog = {
+  id: number;
+  actor: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  details: string;
+  createdAt: string;
+};
+type ReturnRecord = {
+  id: number;
+  receiptNumber: string;
+  saleId: number;
+  amount: number;
+  method: string;
+  reason: string;
+  createdAt: string;
+};
+type Summary = {
+  netSales: number;
+  grossSales: number;
+  refunds: number;
+  tax: number;
+  transactions: number;
+  averageOrder: number;
+  cogs: number;
+  grossProfit: number;
+  tender: Record<string, number>;
+  productSales: Record<string, { quantity: number; revenue: number }>;
+};
+type Operations = {
+  products: Product[];
+  sales: Sale[];
+  shifts: Shift[];
+  cashMovements: CashMovement[];
+  inventoryMovements: Array<{
+    id: number;
+    productId: number;
+    type: string;
+    quantity: number;
+    reason: string | null;
+    createdAt: string;
+  }>;
+  customers: Customer[];
+  employees: Employee[];
+  auditLogs: AuditLog[];
+  returns: ReturnRecord[];
+  summary: Summary;
+};
+type RequestFn = (path: string, body: unknown, method?: string) => Promise<Record<string, unknown>>;
+type QueuedSale = {
+  idempotencyKey: string;
+  items: Array<{ id: number; quantity: number }>;
+  method: "Cash";
+  tendered: number;
+  customerId?: number;
+  employeeId: number;
+  queuedAt: string;
+};
+type CurrentUser = { id: number; name: string; email: string; role: string };
+type PublicConfig = {
+  businessName: string;
+  storeName: string;
+  registerCode: string;
+  currency: string;
+  locale: string;
+  taxRate: number;
+};
 
-const productVisuals:Record<string,[string,string]> = { Coffee:["#E8D5C2","☕"], Bakery:["#F5D89A","🥐"], Tea:["#C9DEB4","🍵"], Food:["#D6DEA5","🥪"], Drinks:["#C7E4EA","🥤"], Other:["#DDE4DF","□"] };
-const navItems = [["register","▦","Register"],["dashboard","⌂","Dashboard"],["transactions","↔","Transactions"],["products","□","Products"],["inventory","◇","Inventory"],["customers","♙","Customers"],["reports","⌁","Reports"],["settings","⚙","Settings"]];
-const roleViews:Record<string,string[]>={Owner:navItems.map(item=>item[0]),Manager:navItems.map(item=>item[0]),Supervisor:["register","dashboard","transactions","inventory","customers","reports"],Cashier:["register","transactions","customers"],Inventory:["products","inventory","reports"],Accountant:["dashboard","transactions","reports"],Auditor:["dashboard","transactions","reports"]};
-let displayConfig:PublicConfig = {businessName:"Atlas Coffee",storeName:"Downtown store",registerCode:"REG-01",currency:"USD",locale:"en-US",taxRate:.0825};
-const money = (value:number) => new Intl.NumberFormat(displayConfig.locale,{style:"currency",currency:displayConfig.currency}).format(Number(value||0));
-const shortDate = (value:string) => new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}).format(new Date(value));
-const csvCell = (value:unknown) => { const raw=String(value); const safe=/^[=+\-@]/.test(raw)?`'${raw}`:raw; return `"${safe.replaceAll('"','""')}"`; };
-const emptySummary:Summary = {netSales:0,grossSales:0,refunds:0,tax:0,transactions:0,averageOrder:0,cogs:0,grossProfit:0,tender:{},productSales:{}};
+const productVisuals: Record<string, [string, string]> = {
+  Coffee: ["#E8D5C2", "☕"],
+  Bakery: ["#F5D89A", "🥐"],
+  Tea: ["#C9DEB4", "🍵"],
+  Food: ["#D6DEA5", "🥪"],
+  Drinks: ["#C7E4EA", "🥤"],
+  Other: ["#DDE4DF", "□"]
+};
+const navItems = [
+  ["register", "▦", "Register"],
+  ["dashboard", "⌂", "Dashboard"],
+  ["transactions", "↔", "Transactions"],
+  ["products", "□", "Products"],
+  ["inventory", "◇", "Inventory"],
+  ["customers", "♙", "Customers"],
+  ["reports", "⌁", "Reports"],
+  ["settings", "⚙", "Settings"]
+];
+const roleViews: Record<string, string[]> = {
+  Owner: navItems.map((item) => item[0]),
+  Manager: navItems.map((item) => item[0]),
+  Supervisor: ["register", "dashboard", "transactions", "inventory", "customers", "reports"],
+  Cashier: ["register", "transactions", "customers"],
+  Inventory: ["products", "inventory", "reports"],
+  Accountant: ["dashboard", "transactions", "reports"],
+  Auditor: ["dashboard", "transactions", "reports"]
+};
+let displayConfig: PublicConfig = {
+  businessName: "Atlas Coffee",
+  storeName: "Downtown store",
+  registerCode: "REG-01",
+  currency: "USD",
+  locale: "en-US",
+  taxRate: 0.0825
+};
+const money = (value: number) =>
+  new Intl.NumberFormat(displayConfig.locale, { style: "currency", currency: displayConfig.currency }).format(
+    Number(value || 0)
+  );
+const shortDate = (value: string) =>
+  new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(
+    new Date(value)
+  );
+const csvCell = (value: unknown) => {
+  const raw = String(value);
+  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+};
+const emptySummary: Summary = {
+  netSales: 0,
+  grossSales: 0,
+  refunds: 0,
+  tax: 0,
+  transactions: 0,
+  averageOrder: 0,
+  cogs: 0,
+  grossProfit: 0,
+  tender: {},
+  productSales: {}
+};
 
-function withVisual(product:Product):Product { const visual=productVisuals[product.category]??productVisuals.Other; return {...product,color:visual[0],icon:visual[1]}; }
-
-export default function PosApp({currentUser,config}:{currentUser:CurrentUser;config:PublicConfig}){
-  displayConfig=config;
-  const [view,setView]=useState(()=>roleViews[currentUser.role]?.includes("register")?"register":roleViews[currentUser.role]?.[0]||"dashboard");
-  const [ops,setOps]=useState<Operations>({products:[],sales:[],shifts:[],cashMovements:[],inventoryMovements:[],customers:[],employees:[],auditLogs:[],returns:[],summary:emptySummary});
-  const [cart,setCart]=useState<CartLine[]>([]);
-  const [category,setCategory]=useState("All items");
-  const [search,setSearch]=useState("");
-  const [selectedCustomer,setSelectedCustomer]=useState<number|undefined>();
-  const [paymentOpen,setPaymentOpen]=useState(false);
-  const [receipt,setReceipt]=useState<{sale:Sale;cart:CartLine[];method:string;tendered:number}|null>(null);
-  const [cashReceived,setCashReceived]=useState("20");
-  const [modal,setModal]=useState<null|"product"|"inventory"|"customer"|"cash"|"close"|"employee">(null);
-  const [selectedSale,setSelectedSale]=useState<Sale|null>(null);
-  const [refundSale,setRefundSale]=useState<Sale|null>(null);
-  const [toast,setToast]=useState("");
-  const [loading,setLoading]=useState(true);
-  const [processing,setProcessing]=useState(false);
-  const [online,setOnline]=useState(true);
-  const [queuedSales,setQueuedSales]=useState(0);
-  const [dates,setDates]=useState({from:new Date(Date.now()-29*86400000).toISOString().slice(0,10),to:new Date().toISOString().slice(0,10)});
-
-  const load=useCallback(async()=>{
-    try{const response=await fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`); const data=await response.json() as Operations&{error?:string}; if(!response.ok)throw new Error(data.error||"Operations data is unavailable"); setOps({...data,products:data.products.map(withVisual)});}catch(error){notify(error instanceof Error?error.message:"Unable to load operations");}finally{setLoading(false);}
-  },[dates.from,dates.to]);
-  useEffect(()=>{const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer);},[load,currentUser.id]);
-  const syncQueue=useCallback(async()=>{const queued=JSON.parse(localStorage.getItem("atlas-offline-sales")||"[]") as QueuedSale[];if(!queued.length){setQueuedSales(0);return;}const remaining:QueuedSale[]=[];for(const sale of queued){if(sale.employeeId!==currentUser.id){remaining.push(sale);continue;}try{const response=await fetch("/api/sales",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(sale)});if(!response.ok)remaining.push(sale);}catch{remaining.push(sale);}}localStorage.setItem("atlas-offline-sales",JSON.stringify(remaining));setQueuedSales(remaining.filter(item=>item.employeeId===currentUser.id).length);if(remaining.length<queued.length){notify(`${queued.length-remaining.length} offline sale${queued.length-remaining.length===1?"":"s"} synchronized`);await load();}},[load,currentUser.id]);
-  useEffect(()=>{const initialize=window.setTimeout(()=>{setOnline(navigator.onLine);const queued=JSON.parse(localStorage.getItem("atlas-offline-sales")||"[]") as QueuedSale[];setQueuedSales(queued.filter(item=>item.employeeId===currentUser.id).length);if(navigator.onLine)void syncQueue();if("serviceWorker" in navigator)void navigator.serviceWorker.register("/sw.js");},0);const handleOnline=()=>{setOnline(true);void syncQueue();};const handleOffline=()=>setOnline(false);window.addEventListener("online",handleOnline);window.addEventListener("offline",handleOffline);return()=>{window.clearTimeout(initialize);window.removeEventListener("online",handleOnline);window.removeEventListener("offline",handleOffline);};},[syncQueue,currentUser.id]);
-  const activeShift=ops.shifts.find(shift=>shift.status==="open")??null;
-  const subtotal=cart.reduce((sum,line)=>sum+line.price*line.quantity,0);
-  const tax=Number((subtotal*config.taxRate).toFixed(2));
-  const total=Number((subtotal+tax).toFixed(2));
-  const filtered=ops.products.filter(product=>product.active&&(category==="All items"||product.category===category)&&`${product.name} ${product.sku} ${product.barcode??""}`.toLowerCase().includes(search.toLowerCase()));
-  const categories=["All items",...Array.from(new Set(ops.products.filter(p=>p.active).map(p=>p.category)))];
-  function notify(message:string){setToast(message);window.setTimeout(()=>setToast(""),2600);}
-  function addProduct(product:Product){if(product.stock<1)return notify(`${product.name} is out of stock`);setCart(current=>{const found=current.find(line=>line.id===product.id);if(found&&found.quantity>=product.stock){notify("No more stock available");return current;}return found?current.map(line=>line.id===product.id?{...line,quantity:line.quantity+1}:line):[...current,{...product,quantity:1}];});}
-  function changeQuantity(id:number,amount:number){setCart(current=>current.map(line=>line.id===id?{...line,quantity:Math.min(line.stock,line.quantity+amount)}:line).filter(line=>line.quantity>0));}
-  async function request(path:string,body:unknown,method="POST"):Promise<Record<string,unknown>>{const response=await fetch(path,{method,headers:{"content-type":"application/json"},body:JSON.stringify(body)});const data=await response.json() as Record<string,unknown>;if(!response.ok)throw new Error(typeof data.error==="string"?data.error:"Action failed");return data;}
-  async function completeSale(method:string){setProcessing(true);try{const tendered=Number(cashReceived)||total;const idempotencyKey=`pos-${Date.now()}-${Math.random().toString(36).slice(2)}`;const payload={items:cart.map(line=>({id:line.id,quantity:line.quantity})),method,tendered,customerId:selectedCustomer,idempotencyKey};if(!online){if(method!=="Cash")throw new Error("Only cash sales can be queued offline");const queued=JSON.parse(localStorage.getItem("atlas-offline-sales")||"[]") as QueuedSale[];queued.push({...payload,method:"Cash",employeeId:currentUser.id,queuedAt:new Date().toISOString()});localStorage.setItem("atlas-offline-sales",JSON.stringify(queued));setQueuedSales(queued.filter(item=>item.employeeId===currentUser.id).length);const offlineSale={id:-Date.now(),receiptNumber:`OFF-${Date.now().toString().slice(-7)}`,employeeName:currentUser.name,subtotal,tax,total,refundedAmount:0,status:"queued",createdAt:new Date().toISOString(),lines:[],payments:[]} as Sale;setReceipt({sale:offlineSale,cart:[...cart],method,tendered});setPaymentOpen(false);setCart([]);setSelectedCustomer(undefined);notify("Cash sale queued for synchronization");return;}const data=await request("/api/sales",payload) as unknown as {sale:Sale};setReceipt({sale:{...data.sale,lines:[],payments:[]},cart:[...cart],method,tendered});setPaymentOpen(false);setCart([]);setSelectedCustomer(undefined);await load();}catch(error){notify(error instanceof Error?error.message:"Payment failed");}finally{setProcessing(false);}}
-  async function openShift(){if(!online)return notify("A shift must be opened while online");try{await request("/api/shifts",{action:"open",openingFloat:200});await load();notify("Register shift opened");}catch(error){notify(error instanceof Error?error.message:"Unable to open shift");}}
-  async function drawerNoSale(){if(!activeShift)return notify("Open a shift first");try{await request("/api/shifts",{action:"no_sale",reason:"Manager-approved drawer opening"});await load();notify("Drawer opening logged");}catch(error){notify(error instanceof Error?error.message:"Drawer action failed");}}
-  function exportCsv(){const rows=[["Receipt","Date","Cashier","Status","Gross","Refunded","Net"],...ops.sales.map(s=>[s.receiptNumber,s.createdAt,s.employeeName,s.status,s.total,s.refundedAmount,s.total-s.refundedAmount])];const csv=rows.map(row=>row.map(value=>csvCell(value)).join(",")).join("\n");const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));link.download=`atlas-sales-${dates.from}-${dates.to}.csv`;link.click();URL.revokeObjectURL(link.href);notify("Sales export downloaded");}
-
-  return <main className="app-shell">
-    <aside className="sidebar"><button className="brand" onClick={()=>setView(roleViews[currentUser.role]?.includes("register")?"register":roleViews[currentUser.role]?.[0]||"dashboard")} aria-label="Atlas POS register"><span className="brand-mark">A</span><span>Atlas<span>POS</span></span></button><nav aria-label="Main navigation">{navItems.filter(([key])=>roleViews[currentUser.role]?.includes(key)).map(([key,icon,label])=><button key={key} className={view===key?"nav-active":""} onClick={()=>setView(key)}><span className="nav-icon">{icon}</span>{label}{key==="inventory"&&<span className="nav-badge">{ops.products.filter(p=>p.active&&p.stock<=p.lowStockThreshold).length}</span>}</button>)}</nav><div className="sidebar-bottom"><button className="help-button" onClick={()=>notify("Support details are in the deployment guide")}><span>?</span> Help & support</button><div className="profile"><div className="avatar">{currentUser.name.split(" ").map(v=>v[0]).slice(0,2).join("")}</div><div><strong>{currentUser.name}</strong><small>{currentUser.role}</small></div><button aria-label="Sign out" title="Sign out" onClick={async()=>{await fetch("/api/auth/logout",{method:"POST"});window.location.assign("/login");}}>↪</button></div></div></aside>
-    <section className="workspace">{view==="register"?<RegisterView {...{cart,category,search,filtered,categories,subtotal,tax,total,activeShift,customers:ops.customers,selectedCustomer,setSelectedCustomer,setCategory,setSearch,addProduct,changeQuantity,setCart,setPaymentOpen,notify,openShift,drawerNoSale,setModal,online,queuedSales}}/>:<BackOffice {...{view,setView,ops,dates,setDates,loading,exportCsv,setModal,setSelectedSale,setRefundSale,notify,request,load}}/>}</section>
-    {paymentOpen&&<PaymentModal {...{total,cashReceived,setCashReceived,close:()=>setPaymentOpen(false),completeSale,processing,online}}/>}
-    {receipt&&<ReceiptModal data={receipt} close={()=>setReceipt(null)}/>}
-    {modal&&<ActionModal kind={modal} close={()=>setModal(null)} products={ops.products} shift={activeShift} request={request} reload={load} notify={notify}/>}
-    {selectedSale&&<SaleModal sale={selectedSale} close={()=>setSelectedSale(null)} refund={()=>{setRefundSale(selectedSale);setSelectedSale(null);}}/>}
-    {refundSale&&<RefundModal sale={refundSale} close={()=>setRefundSale(null)} request={request} reload={load} notify={notify}/>}
-    {toast&&<div className="toast"><span>✓</span>{toast}</div>}
-  </main>;
+function withVisual(product: Product): Product {
+  const visual = productVisuals[product.category] ?? productVisuals.Other;
+  return { ...product, color: visual[0], icon: visual[1] };
 }
 
-function RegisterView(p:{cart:CartLine[];category:string;search:string;filtered:Product[];categories:string[];subtotal:number;tax:number;total:number;activeShift:Shift|null;customers:Customer[];selectedCustomer:number|undefined;setSelectedCustomer:(v:number|undefined)=>void;setCategory:(v:string)=>void;setSearch:(v:string)=>void;addProduct:(v:Product)=>void;changeQuantity:(id:number,n:number)=>void;setCart:(v:CartLine[])=>void;setPaymentOpen:(v:boolean)=>void;notify:(v:string)=>void;openShift:()=>void;drawerNoSale:()=>void;setModal:(v:"cash"|"close")=>void;online:boolean;queuedSales:number}){
-  return <div className="register-layout"><div className="catalogue-panel"><header className="topbar"><div><span className={`status-dot ${p.online?"online":"offline"}`}/>{p.online?(p.activeShift?"Register open":"Register closed"):"Offline mode"}<small>{p.queuedSales?`${p.queuedSales} cash sale${p.queuedSales===1?"":"s"} awaiting sync`:p.activeShift?`${p.activeShift.registerCode} · ${money(p.activeShift.expectedCash)} expected`:"Open a shift to begin"}</small></div><div className="top-actions"><button onClick={()=>p.notify("Barcode scanner ready")}>⌗ <span>Scan</span></button><button onClick={p.drawerNoSale}>▰ <span>Open drawer</span></button><time suppressHydrationWarning>{new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}<small suppressHydrationWarning>{new Date().toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"})}</small></time></div></header><section className="catalogue-content"><div className="catalogue-heading"><div><p>New sale</p><h1>What are we selling?</h1></div><button className="hold-button" onClick={()=>p.notify("Sale held on this register")}>Ⅱ Hold sale</button></div><label className="search-box"><span>⌕</span><input value={p.search} onChange={e=>p.setSearch(e.target.value)} placeholder="Search products, SKU, or scan barcode..."/><kbd>F2</kbd></label><div className="category-tabs">{p.categories.map(item=><button key={item} className={p.category===item?"selected":""} onClick={()=>p.setCategory(item)}>{item}</button>)}</div><div className="product-grid">{p.filtered.map(product=><button className="product-card" key={product.id} onClick={()=>p.addProduct(product)} disabled={!product.stock}><span className="product-visual" style={{background:product.color}}>{product.icon}</span><span className="product-name">{product.name}</span><span className={`product-meta ${product.stock<=product.lowStockThreshold?"low-text":""}`}>{product.stock} in stock</span><strong>{money(product.price)}</strong></button>)}</div></section></div><aside className="cart-panel"><div className="cart-heading"><div><h2>Current order</h2><p>{p.cart.reduce((n,l)=>n+l.quantity,0)} items</p></div><button className="more-button">•••</button></div><label className="customer-select"><span>♙</span><select value={p.selectedCustomer??""} onChange={e=>p.setSelectedCustomer(e.target.value?Number(e.target.value):undefined)}><option value="">Walk-in customer</option>{p.customers.map(c=><option key={c.id} value={c.id}>{c.name} · {c.loyaltyPoints} pts</option>)}</select></label><div className="cart-lines">{!p.cart.length&&<div className="empty-cart"><span>▢</span><h3>Your cart is empty</h3><p>Select an item to begin a sale.</p></div>}{p.cart.map(line=><div className="cart-line" key={line.id}><span className="line-icon" style={{background:line.color}}>{line.icon}</span><div className="line-info"><strong>{line.name}</strong><small>{line.sku}</small><div className="quantity"><button onClick={()=>p.changeQuantity(line.id,-1)}>−</button><span>{line.quantity}</span><button onClick={()=>p.changeQuantity(line.id,1)}>＋</button></div></div><div className="line-price"><strong>{money(line.price*line.quantity)}</strong><button onClick={()=>p.changeQuantity(line.id,-line.quantity)}>×</button></div></div>)}</div><div className="cart-summary"><button className="discount-button" onClick={()=>p.notify("Discounts require supervisor approval")}>＋ Add discount or promo code</button><dl><div><dt>Subtotal</dt><dd>{money(p.subtotal)}</dd></div><div><dt>Tax <small>{(displayConfig.taxRate*100).toFixed(2)}%</small></dt><dd>{money(p.tax)}</dd></div><div className="total"><dt>Total</dt><dd>{money(p.total)}</dd></div></dl><button className="pay-button" disabled={!p.cart.length||!p.activeShift} onClick={()=>p.setPaymentOpen(true)}><span>{p.activeShift?`Pay ${money(p.total)}`:"Open shift first"}</span><kbd>F4</kbd></button><div className="cart-actions"><button onClick={()=>p.setCart([])}>⌫ Clear</button><button onClick={()=>p.notify("Order note added")}>▤ Add note</button>{p.activeShift?<><button onClick={()=>p.setModal("cash")}>Cash in/out</button><button onClick={()=>p.setModal("close")}>Close shift</button></>:<button onClick={p.openShift}>Open shift</button>}</div></div></aside></div>;
+export default function PosApp({ currentUser, config }: { currentUser: CurrentUser; config: PublicConfig }) {
+  displayConfig = config;
+  const [view, setView] = useState(() =>
+    roleViews[currentUser.role]?.includes("register") ? "register" : roleViews[currentUser.role]?.[0] || "dashboard"
+  );
+  const [ops, setOps] = useState<Operations>({
+    products: [],
+    sales: [],
+    shifts: [],
+    cashMovements: [],
+    inventoryMovements: [],
+    customers: [],
+    employees: [],
+    auditLogs: [],
+    returns: [],
+    summary: emptySummary
+  });
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [category, setCategory] = useState("All items");
+  const [search, setSearch] = useState("");
+  const [selectedCustomer, setSelectedCustomer] = useState<number | undefined>();
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [receipt, setReceipt] = useState<{ sale: Sale; cart: CartLine[]; method: string; tendered: number } | null>(
+    null
+  );
+  const [cashReceived, setCashReceived] = useState("20");
+  const [modal, setModal] = useState<null | "product" | "inventory" | "customer" | "cash" | "close" | "employee">(null);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [refundSale, setRefundSale] = useState<Sale | null>(null);
+  const [toast, setToast] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [online, setOnline] = useState(true);
+  const [queuedSales, setQueuedSales] = useState(0);
+  const [dates, setDates] = useState({
+    from: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10),
+    to: new Date().toISOString().slice(0, 10)
+  });
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`);
+      const data = (await response.json()) as Operations & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Operations data is unavailable");
+      setOps({ ...data, products: data.products.map(withVisual) });
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to load operations");
+    } finally {
+      setLoading(false);
+    }
+  }, [dates.from, dates.to]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load, currentUser.id]);
+  const syncQueue = useCallback(async () => {
+    const queued = JSON.parse(localStorage.getItem("atlas-offline-sales") || "[]") as QueuedSale[];
+    if (!queued.length) {
+      setQueuedSales(0);
+      return;
+    }
+    const remaining: QueuedSale[] = [];
+    for (const sale of queued) {
+      if (sale.employeeId !== currentUser.id) {
+        remaining.push(sale);
+        continue;
+      }
+      try {
+        const response = await fetch("/api/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(sale)
+        });
+        if (!response.ok) remaining.push(sale);
+      } catch {
+        remaining.push(sale);
+      }
+    }
+    localStorage.setItem("atlas-offline-sales", JSON.stringify(remaining));
+    setQueuedSales(remaining.filter((item) => item.employeeId === currentUser.id).length);
+    if (remaining.length < queued.length) {
+      notify(
+        `${queued.length - remaining.length} offline sale${queued.length - remaining.length === 1 ? "" : "s"} synchronized`
+      );
+      await load();
+    }
+  }, [load, currentUser.id]);
+  useEffect(() => {
+    const initialize = window.setTimeout(() => {
+      setOnline(navigator.onLine);
+      const queued = JSON.parse(localStorage.getItem("atlas-offline-sales") || "[]") as QueuedSale[];
+      setQueuedSales(queued.filter((item) => item.employeeId === currentUser.id).length);
+      if (navigator.onLine) void syncQueue();
+      if ("serviceWorker" in navigator) void navigator.serviceWorker.register("/sw.js");
+    }, 0);
+    const handleOnline = () => {
+      setOnline(true);
+      void syncQueue();
+    };
+    const handleOffline = () => setOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.clearTimeout(initialize);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [syncQueue, currentUser.id]);
+  const activeShift = ops.shifts.find((shift) => shift.status === "open") ?? null;
+  const subtotal = cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
+  const tax = Number((subtotal * config.taxRate).toFixed(2));
+  const total = Number((subtotal + tax).toFixed(2));
+  const filtered = ops.products.filter(
+    (product) =>
+      product.active &&
+      (category === "All items" || product.category === category) &&
+      `${product.name} ${product.sku} ${product.barcode ?? ""}`.toLowerCase().includes(search.toLowerCase())
+  );
+  const categories = ["All items", ...Array.from(new Set(ops.products.filter((p) => p.active).map((p) => p.category)))];
+  function notify(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+  function addProduct(product: Product) {
+    if (product.stock < 1) return notify(`${product.name} is out of stock`);
+    setCart((current) => {
+      const found = current.find((line) => line.id === product.id);
+      if (found && found.quantity >= product.stock) {
+        notify("No more stock available");
+        return current;
+      }
+      return found
+        ? current.map((line) => (line.id === product.id ? { ...line, quantity: line.quantity + 1 } : line))
+        : [...current, { ...product, quantity: 1 }];
+    });
+  }
+  function changeQuantity(id: number, amount: number) {
+    setCart((current) =>
+      current
+        .map((line) => (line.id === id ? { ...line, quantity: Math.min(line.stock, line.quantity + amount) } : line))
+        .filter((line) => line.quantity > 0)
+    );
+  }
+  async function request(path: string, body: unknown, method = "POST"): Promise<Record<string, unknown>> {
+    const response = await fetch(path, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Action failed");
+    return data;
+  }
+  async function completeSale(method: string) {
+    setProcessing(true);
+    try {
+      const tendered = Number(cashReceived) || total;
+      const idempotencyKey = `pos-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const payload = {
+        items: cart.map((line) => ({ id: line.id, quantity: line.quantity })),
+        method,
+        tendered,
+        customerId: selectedCustomer,
+        idempotencyKey
+      };
+      if (!online) {
+        if (method !== "Cash") throw new Error("Only cash sales can be queued offline");
+        const queued = JSON.parse(localStorage.getItem("atlas-offline-sales") || "[]") as QueuedSale[];
+        queued.push({ ...payload, method: "Cash", employeeId: currentUser.id, queuedAt: new Date().toISOString() });
+        localStorage.setItem("atlas-offline-sales", JSON.stringify(queued));
+        setQueuedSales(queued.filter((item) => item.employeeId === currentUser.id).length);
+        const offlineSale = {
+          id: -Date.now(),
+          receiptNumber: `OFF-${Date.now().toString().slice(-7)}`,
+          employeeName: currentUser.name,
+          subtotal,
+          tax,
+          total,
+          refundedAmount: 0,
+          status: "queued",
+          createdAt: new Date().toISOString(),
+          lines: [],
+          payments: []
+        } as Sale;
+        setReceipt({ sale: offlineSale, cart: [...cart], method, tendered });
+        setPaymentOpen(false);
+        setCart([]);
+        setSelectedCustomer(undefined);
+        notify("Cash sale queued for synchronization");
+        return;
+      }
+      const data = (await request("/api/sales", payload)) as unknown as { sale: Sale };
+      setReceipt({ sale: { ...data.sale, lines: [], payments: [] }, cart: [...cart], method, tendered });
+      setPaymentOpen(false);
+      setCart([]);
+      setSelectedCustomer(undefined);
+      await load();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Payment failed");
+    } finally {
+      setProcessing(false);
+    }
+  }
+  async function openShift() {
+    if (!online) return notify("A shift must be opened while online");
+    try {
+      await request("/api/shifts", { action: "open", openingFloat: 200 });
+      await load();
+      notify("Register shift opened");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to open shift");
+    }
+  }
+  async function drawerNoSale() {
+    if (!activeShift) return notify("Open a shift first");
+    try {
+      await request("/api/shifts", { action: "no_sale", reason: "Manager-approved drawer opening" });
+      await load();
+      notify("Drawer opening logged");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Drawer action failed");
+    }
+  }
+  function exportCsv() {
+    const rows = [
+      ["Receipt", "Date", "Cashier", "Status", "Gross", "Refunded", "Net"],
+      ...ops.sales.map((s) => [
+        s.receiptNumber,
+        s.createdAt,
+        s.employeeName,
+        s.status,
+        s.total,
+        s.refundedAmount,
+        s.total - s.refundedAmount
+      ])
+    ];
+    const csv = rows.map((row) => row.map((value) => csvCell(value)).join(",")).join("\n");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    link.download = `atlas-sales-${dates.from}-${dates.to}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    notify("Sales export downloaded");
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <button
+          className="brand"
+          onClick={() =>
+            setView(
+              roleViews[currentUser.role]?.includes("register")
+                ? "register"
+                : roleViews[currentUser.role]?.[0] || "dashboard"
+            )
+          }
+          aria-label="Atlas POS register"
+        >
+          <span className="brand-mark">A</span>
+          <span>
+            Atlas<span>POS</span>
+          </span>
+        </button>
+        <nav aria-label="Main navigation">
+          {navItems
+            .filter(([key]) => roleViews[currentUser.role]?.includes(key))
+            .map(([key, icon, label]) => (
+              <button key={key} className={view === key ? "nav-active" : ""} onClick={() => setView(key)}>
+                <span className="nav-icon">{icon}</span>
+                {label}
+                {key === "inventory" && (
+                  <span className="nav-badge">
+                    {ops.products.filter((p) => p.active && p.stock <= p.lowStockThreshold).length}
+                  </span>
+                )}
+              </button>
+            ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <button className="help-button" onClick={() => notify("Support details are in the deployment guide")}>
+            <span>?</span> Help & support
+          </button>
+          <div className="profile">
+            <div className="avatar">
+              {currentUser.name
+                .split(" ")
+                .map((v) => v[0])
+                .slice(0, 2)
+                .join("")}
+            </div>
+            <div>
+              <strong>{currentUser.name}</strong>
+              <small>{currentUser.role}</small>
+            </div>
+            <button
+              aria-label="Sign out"
+              title="Sign out"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                window.location.assign("/login");
+              }}
+            >
+              ↪
+            </button>
+          </div>
+        </div>
+      </aside>
+      <section className="workspace">
+        {view === "register" ? (
+          <RegisterView
+            {...{
+              cart,
+              category,
+              search,
+              filtered,
+              categories,
+              subtotal,
+              tax,
+              total,
+              activeShift,
+              customers: ops.customers,
+              selectedCustomer,
+              setSelectedCustomer,
+              setCategory,
+              setSearch,
+              addProduct,
+              changeQuantity,
+              setCart,
+              setPaymentOpen,
+              notify,
+              openShift,
+              drawerNoSale,
+              setModal,
+              online,
+              queuedSales
+            }}
+          />
+        ) : (
+          <BackOffice
+            {...{
+              view,
+              setView,
+              ops,
+              dates,
+              setDates,
+              loading,
+              exportCsv,
+              setModal,
+              setSelectedSale,
+              setRefundSale,
+              notify,
+              request,
+              load
+            }}
+          />
+        )}
+      </section>
+      {paymentOpen && (
+        <PaymentModal
+          {...{
+            total,
+            cashReceived,
+            setCashReceived,
+            close: () => setPaymentOpen(false),
+            completeSale,
+            processing,
+            online
+          }}
+        />
+      )}
+      {receipt && <ReceiptModal data={receipt} close={() => setReceipt(null)} />}
+      {modal && (
+        <ActionModal
+          kind={modal}
+          close={() => setModal(null)}
+          products={ops.products}
+          shift={activeShift}
+          request={request}
+          reload={load}
+          notify={notify}
+        />
+      )}
+      {selectedSale && (
+        <SaleModal
+          sale={selectedSale}
+          close={() => setSelectedSale(null)}
+          refund={() => {
+            setRefundSale(selectedSale);
+            setSelectedSale(null);
+          }}
+        />
+      )}
+      {refundSale && (
+        <RefundModal
+          sale={refundSale}
+          close={() => setRefundSale(null)}
+          request={request}
+          reload={load}
+          notify={notify}
+        />
+      )}
+      {toast && (
+        <div className="toast">
+          <span>✓</span>
+          {toast}
+        </div>
+      )}
+    </main>
+  );
 }
 
-function BackOffice(p:{view:string;setView:(v:string)=>void;ops:Operations;dates:{from:string;to:string};setDates:(v:{from:string;to:string})=>void;loading:boolean;exportCsv:()=>void;setModal:(v:"product"|"inventory"|"customer"|"employee")=>void;setSelectedSale:(v:Sale)=>void;setRefundSale:(v:Sale)=>void;notify:(v:string)=>void;request:RequestFn;load:()=>Promise<void>}){
-  const {ops}=p; const title=p.view[0].toUpperCase()+p.view.slice(1); const low=ops.products.filter(product=>product.active&&product.stock<=product.lowStockThreshold);
-  const header=<header className="backoffice-top"><div><p>{displayConfig.storeName} · Live operations</p><h1>{title}</h1></div><div className="bo-actions date-actions"><label>From<input type="date" value={p.dates.from} onChange={e=>p.setDates({...p.dates,from:e.target.value})}/></label><label>To<input type="date" value={p.dates.to} onChange={e=>p.setDates({...p.dates,to:e.target.value})}/></label><button className="primary-small" onClick={p.exportCsv}>Export CSV</button></div></header>;
-  if(p.loading)return <div className="backoffice">{header}<div className="loading-card">Loading live store operations…</div></div>;
-  return <div className="backoffice">{header}{p.view==="dashboard"&&<Dashboard ops={ops} setView={p.setView}/>} {p.view==="transactions"&&<Transactions sales={ops.sales} setSelected={p.setSelectedSale} refund={p.setRefundSale}/>} {p.view==="products"&&<Products products={ops.products} add={()=>p.setModal("product")} request={p.request} reload={p.load} notify={p.notify}/>} {p.view==="inventory"&&<Inventory products={ops.products} movements={ops.inventoryMovements} adjust={()=>p.setModal("inventory")}/>} {p.view==="customers"&&<Customers customers={ops.customers} add={()=>p.setModal("customer")}/>} {p.view==="reports"&&<Reports ops={ops}/>} {p.view==="settings"&&<Settings ops={ops} addEmployee={()=>p.setModal("employee")} request={p.request} reload={p.load} notify={p.notify}/>} {p.view!=="dashboard"&&<div className="context-strip"><span>{ops.summary.transactions} transactions in selected range</span><span>{money(ops.summary.netSales)} net sales</span><span>{low.length} low-stock alerts</span></div>}</div>;
+function RegisterView(p: {
+  cart: CartLine[];
+  category: string;
+  search: string;
+  filtered: Product[];
+  categories: string[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  activeShift: Shift | null;
+  customers: Customer[];
+  selectedCustomer: number | undefined;
+  setSelectedCustomer: (v: number | undefined) => void;
+  setCategory: (v: string) => void;
+  setSearch: (v: string) => void;
+  addProduct: (v: Product) => void;
+  changeQuantity: (id: number, n: number) => void;
+  setCart: (v: CartLine[]) => void;
+  setPaymentOpen: (v: boolean) => void;
+  notify: (v: string) => void;
+  openShift: () => void;
+  drawerNoSale: () => void;
+  setModal: (v: "cash" | "close") => void;
+  online: boolean;
+  queuedSales: number;
+}) {
+  return (
+    <div className="register-layout">
+      <div className="catalogue-panel">
+        <header className="topbar">
+          <div>
+            <span className={`status-dot ${p.online ? "online" : "offline"}`} />
+            {p.online ? (p.activeShift ? "Register open" : "Register closed") : "Offline mode"}
+            <small>
+              {p.queuedSales
+                ? `${p.queuedSales} cash sale${p.queuedSales === 1 ? "" : "s"} awaiting sync`
+                : p.activeShift
+                  ? `${p.activeShift.registerCode} · ${money(p.activeShift.expectedCash)} expected`
+                  : "Open a shift to begin"}
+            </small>
+          </div>
+          <div className="top-actions">
+            <button onClick={() => p.notify("Barcode scanner ready")}>
+              ⌗ <span>Scan</span>
+            </button>
+            <button onClick={p.drawerNoSale}>
+              ▰ <span>Open drawer</span>
+            </button>
+            <time suppressHydrationWarning>
+              {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              <small suppressHydrationWarning>
+                {new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+              </small>
+            </time>
+          </div>
+        </header>
+        <section className="catalogue-content">
+          <div className="catalogue-heading">
+            <div>
+              <p>New sale</p>
+              <h1>What are we selling?</h1>
+            </div>
+            <button className="hold-button" onClick={() => p.notify("Sale held on this register")}>
+              Ⅱ Hold sale
+            </button>
+          </div>
+          <label className="search-box">
+            <span>⌕</span>
+            <input
+              value={p.search}
+              onChange={(e) => p.setSearch(e.target.value)}
+              placeholder="Search products, SKU, or scan barcode..."
+            />
+            <kbd>F2</kbd>
+          </label>
+          <div className="category-tabs">
+            {p.categories.map((item) => (
+              <button key={item} className={p.category === item ? "selected" : ""} onClick={() => p.setCategory(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+          <div className="product-grid">
+            {p.filtered.map((product) => (
+              <button
+                className="product-card"
+                key={product.id}
+                onClick={() => p.addProduct(product)}
+                disabled={!product.stock}
+              >
+                <span className="product-visual" style={{ background: product.color }}>
+                  {product.icon}
+                </span>
+                <span className="product-name">{product.name}</span>
+                <span className={`product-meta ${product.stock <= product.lowStockThreshold ? "low-text" : ""}`}>
+                  {product.stock} in stock
+                </span>
+                <strong>{money(product.price)}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+      <aside className="cart-panel">
+        <div className="cart-heading">
+          <div>
+            <h2>Current order</h2>
+            <p>{p.cart.reduce((n, l) => n + l.quantity, 0)} items</p>
+          </div>
+          <button className="more-button">•••</button>
+        </div>
+        <label className="customer-select">
+          <span>♙</span>
+          <select
+            value={p.selectedCustomer ?? ""}
+            onChange={(e) => p.setSelectedCustomer(e.target.value ? Number(e.target.value) : undefined)}
+          >
+            <option value="">Walk-in customer</option>
+            {p.customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} · {c.loyaltyPoints} pts
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="cart-lines">
+          {!p.cart.length && (
+            <div className="empty-cart">
+              <span>▢</span>
+              <h3>Your cart is empty</h3>
+              <p>Select an item to begin a sale.</p>
+            </div>
+          )}
+          {p.cart.map((line) => (
+            <div className="cart-line" key={line.id}>
+              <span className="line-icon" style={{ background: line.color }}>
+                {line.icon}
+              </span>
+              <div className="line-info">
+                <strong>{line.name}</strong>
+                <small>{line.sku}</small>
+                <div className="quantity">
+                  <button onClick={() => p.changeQuantity(line.id, -1)}>−</button>
+                  <span>{line.quantity}</span>
+                  <button onClick={() => p.changeQuantity(line.id, 1)}>＋</button>
+                </div>
+              </div>
+              <div className="line-price">
+                <strong>{money(line.price * line.quantity)}</strong>
+                <button onClick={() => p.changeQuantity(line.id, -line.quantity)}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="cart-summary">
+          <button className="discount-button" onClick={() => p.notify("Discounts require supervisor approval")}>
+            ＋ Add discount or promo code
+          </button>
+          <dl>
+            <div>
+              <dt>Subtotal</dt>
+              <dd>{money(p.subtotal)}</dd>
+            </div>
+            <div>
+              <dt>
+                Tax <small>{(displayConfig.taxRate * 100).toFixed(2)}%</small>
+              </dt>
+              <dd>{money(p.tax)}</dd>
+            </div>
+            <div className="total">
+              <dt>Total</dt>
+              <dd>{money(p.total)}</dd>
+            </div>
+          </dl>
+          <button
+            className="pay-button"
+            disabled={!p.cart.length || !p.activeShift}
+            onClick={() => p.setPaymentOpen(true)}
+          >
+            <span>{p.activeShift ? `Pay ${money(p.total)}` : "Open shift first"}</span>
+            <kbd>F4</kbd>
+          </button>
+          <div className="cart-actions">
+            <button onClick={() => p.setCart([])}>⌫ Clear</button>
+            <button onClick={() => p.notify("Order note added")}>▤ Add note</button>
+            {p.activeShift ? (
+              <>
+                <button onClick={() => p.setModal("cash")}>Cash in/out</button>
+                <button onClick={() => p.setModal("close")}>Close shift</button>
+              </>
+            ) : (
+              <button onClick={p.openShift}>Open shift</button>
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
 }
 
-function Dashboard({ops,setView}:{ops:Operations;setView:(v:string)=>void}){const top=Object.entries(ops.summary.productSales).sort((a,b)=>b[1].revenue-a[1].revenue).slice(0,6);const max=Math.max(1,...top.map(([,v])=>v.revenue));return <><div className="kpi-grid"><Kpi label="Net sales" value={money(ops.summary.netSales)} note={`${money(ops.summary.refunds)} refunded`}/><Kpi label="Transactions" value={String(ops.summary.transactions)} note={`${money(ops.summary.averageOrder)} average`}/><Kpi label="Tax collected" value={money(ops.summary.tax)} note="After refunded tax"/><Kpi label="Cash expected" value={money(ops.shifts.find(s=>s.status==="open")?.expectedCash??0)} note="Active register"/></div><div className="dashboard-grid"><article className="sales-chart"><div className="card-title"><div><p>Product performance</p><h2>Top sellers</h2></div><span>Selected range</span></div><div className="horizontal-bars">{top.length?top.map(([id,value])=>{const product=ops.products.find(item=>item.id===Number(id));return <div key={id}><label><span>{product?.name??"Archived product"}</span><b>{money(value.revenue)}</b></label><i><span style={{width:`${Math.max(5,value.revenue/max*100)}%`}}/></i></div>}):<Empty text="Complete a sale to see product performance."/>}</div></article><TenderCard summary={ops.summary}/></div><Transactions sales={ops.sales.slice(0,6)} compact setSelected={()=>setView("transactions")} refund={()=>setView("transactions")}/></>}
-function Kpi({label,value,note}:{label:string;value:string;note:string}){return <article><span>{label}</span><strong>{value}</strong><small>{note}</small></article>}
-function TenderCard({summary}:{summary:Summary}){const entries=Object.entries(summary.tender);return <article className="tender-card"><div className="card-title"><div><p>Payment methods</p><h2>Tender mix</h2></div></div><div className="donut"><div><strong>{summary.transactions}</strong><small>sales</small></div></div><ul>{entries.length?entries.map(([method,value],i)=><li key={method}><i className={i===1?"cash-color":i===2?"other-color":"card-color"}/>{method}<strong>{money(value)}</strong></li>):<li>No payments in range</li>}</ul></article>}
+function BackOffice(p: {
+  view: string;
+  setView: (v: string) => void;
+  ops: Operations;
+  dates: { from: string; to: string };
+  setDates: (v: { from: string; to: string }) => void;
+  loading: boolean;
+  exportCsv: () => void;
+  setModal: (v: "product" | "inventory" | "customer" | "employee") => void;
+  setSelectedSale: (v: Sale) => void;
+  setRefundSale: (v: Sale) => void;
+  notify: (v: string) => void;
+  request: RequestFn;
+  load: () => Promise<void>;
+}) {
+  const { ops } = p;
+  const title = p.view[0].toUpperCase() + p.view.slice(1);
+  const low = ops.products.filter((product) => product.active && product.stock <= product.lowStockThreshold);
+  const header = (
+    <header className="backoffice-top">
+      <div>
+        <p>{displayConfig.storeName} · Live operations</p>
+        <h1>{title}</h1>
+      </div>
+      <div className="bo-actions date-actions">
+        <label>
+          From
+          <input type="date" value={p.dates.from} onChange={(e) => p.setDates({ ...p.dates, from: e.target.value })} />
+        </label>
+        <label>
+          To
+          <input type="date" value={p.dates.to} onChange={(e) => p.setDates({ ...p.dates, to: e.target.value })} />
+        </label>
+        <button className="primary-small" onClick={p.exportCsv}>
+          Export CSV
+        </button>
+      </div>
+    </header>
+  );
+  if (p.loading)
+    return (
+      <div className="backoffice">
+        {header}
+        <div className="loading-card">Loading live store operations…</div>
+      </div>
+    );
+  return (
+    <div className="backoffice">
+      {header}
+      {p.view === "dashboard" && <Dashboard ops={ops} setView={p.setView} />}{" "}
+      {p.view === "transactions" && (
+        <Transactions sales={ops.sales} setSelected={p.setSelectedSale} refund={p.setRefundSale} />
+      )}{" "}
+      {p.view === "products" && (
+        <Products
+          products={ops.products}
+          add={() => p.setModal("product")}
+          request={p.request}
+          reload={p.load}
+          notify={p.notify}
+        />
+      )}{" "}
+      {p.view === "inventory" && (
+        <Inventory products={ops.products} movements={ops.inventoryMovements} adjust={() => p.setModal("inventory")} />
+      )}{" "}
+      {p.view === "customers" && <Customers customers={ops.customers} add={() => p.setModal("customer")} />}{" "}
+      {p.view === "reports" && <Reports ops={ops} />}{" "}
+      {p.view === "settings" && (
+        <Settings
+          ops={ops}
+          addEmployee={() => p.setModal("employee")}
+          request={p.request}
+          reload={p.load}
+          notify={p.notify}
+        />
+      )}{" "}
+      {p.view !== "dashboard" && (
+        <div className="context-strip">
+          <span>{ops.summary.transactions} transactions in selected range</span>
+          <span>{money(ops.summary.netSales)} net sales</span>
+          <span>{low.length} low-stock alerts</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
-function Transactions({sales,setSelected,refund,compact=false}:{sales:Sale[];setSelected:(v:Sale)=>void;refund:(v:Sale)=>void;compact?:boolean}){return <article className="transactions-card operations-card"><div className="card-title"><div><p>Financial ledger</p><h2>{compact?"Recent transactions":"Sales transactions"}</h2></div><span>{sales.length} records</span></div><div className="table-scroll"><table><thead><tr>{["Receipt","Date","Cashier","Tender","Total","Refunded","Status","Actions"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{sales.map(sale=><tr key={sale.id}><td><button className="link-button" onClick={()=>setSelected(sale)}>{sale.receiptNumber}</button></td><td>{shortDate(sale.createdAt)}</td><td>{sale.employeeName}</td><td>{sale.payments.map(p=>p.method).join(" + ")||"—"}</td><td>{money(sale.total)}</td><td>{money(sale.refundedAmount)}</td><td><span className={sale.status==="completed"?"complete-status":"refund-status"}>{sale.status.replaceAll("_"," ")}</span></td><td><button className="table-action" onClick={()=>setSelected(sale)}>Details</button>{sale.status!=="refunded"&&!compact&&<button className="table-action danger-link" onClick={()=>refund(sale)}>Refund</button>}</td></tr>)}</tbody></table></div>{!sales.length&&<Empty text="No transactions match this date range."/>}</article>}
+function Dashboard({ ops, setView }: { ops: Operations; setView: (v: string) => void }) {
+  const top = Object.entries(ops.summary.productSales)
+    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .slice(0, 6);
+  const max = Math.max(1, ...top.map(([, v]) => v.revenue));
+  return (
+    <>
+      <div className="kpi-grid">
+        <Kpi label="Net sales" value={money(ops.summary.netSales)} note={`${money(ops.summary.refunds)} refunded`} />
+        <Kpi
+          label="Transactions"
+          value={String(ops.summary.transactions)}
+          note={`${money(ops.summary.averageOrder)} average`}
+        />
+        <Kpi label="Tax collected" value={money(ops.summary.tax)} note="After refunded tax" />
+        <Kpi
+          label="Cash expected"
+          value={money(ops.shifts.find((s) => s.status === "open")?.expectedCash ?? 0)}
+          note="Active register"
+        />
+      </div>
+      <div className="dashboard-grid">
+        <article className="sales-chart">
+          <div className="card-title">
+            <div>
+              <p>Product performance</p>
+              <h2>Top sellers</h2>
+            </div>
+            <span>Selected range</span>
+          </div>
+          <div className="horizontal-bars">
+            {top.length ? (
+              top.map(([id, value]) => {
+                const product = ops.products.find((item) => item.id === Number(id));
+                return (
+                  <div key={id}>
+                    <label>
+                      <span>{product?.name ?? "Archived product"}</span>
+                      <b>{money(value.revenue)}</b>
+                    </label>
+                    <i>
+                      <span style={{ width: `${Math.max(5, (value.revenue / max) * 100)}%` }} />
+                    </i>
+                  </div>
+                );
+              })
+            ) : (
+              <Empty text="Complete a sale to see product performance." />
+            )}
+          </div>
+        </article>
+        <TenderCard summary={ops.summary} />
+      </div>
+      <Transactions
+        sales={ops.sales.slice(0, 6)}
+        compact
+        setSelected={() => setView("transactions")}
+        refund={() => setView("transactions")}
+      />
+    </>
+  );
+}
+function Kpi({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <article>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </article>
+  );
+}
+function TenderCard({ summary }: { summary: Summary }) {
+  const entries = Object.entries(summary.tender);
+  return (
+    <article className="tender-card">
+      <div className="card-title">
+        <div>
+          <p>Payment methods</p>
+          <h2>Tender mix</h2>
+        </div>
+      </div>
+      <div className="donut">
+        <div>
+          <strong>{summary.transactions}</strong>
+          <small>sales</small>
+        </div>
+      </div>
+      <ul>
+        {entries.length ? (
+          entries.map(([method, value], i) => (
+            <li key={method}>
+              <i className={i === 1 ? "cash-color" : i === 2 ? "other-color" : "card-color"} />
+              {method}
+              <strong>{money(value)}</strong>
+            </li>
+          ))
+        ) : (
+          <li>No payments in range</li>
+        )}
+      </ul>
+    </article>
+  );
+}
 
-function Products({products,add,request,reload,notify}:{products:Product[];add:()=>void;request:RequestFn;reload:()=>Promise<void>;notify:(v:string)=>void}){async function toggle(product:Product){try{await request("/api/products",{id:product.id,active:!product.active},"PATCH");await reload();notify(`${product.name} ${product.active?"archived":"restored"}`);}catch(e){notify(e instanceof Error?e.message:"Update failed")}}return <article className="operations-card"><div className="section-toolbar"><div><p>Catalogue</p><h2>{products.filter(p=>p.active).length} active products</h2></div><button className="primary-small" onClick={add}>＋ Add product</button></div><div className="table-scroll"><table><thead><tr>{["Product","SKU / barcode","Category","Cost","Price","Margin","Stock","State",""].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{products.map(product=><tr key={product.id} className={!product.active?"muted-row":""}><td><span className="mini-product" style={{background:product.color}}>{product.icon}</span><strong>{product.name}</strong></td><td>{product.sku}<small>{product.barcode||"No barcode"}</small></td><td>{product.category}</td><td>{money(product.cost)}</td><td>{money(product.price)}</td><td>{product.price?`${Math.round((product.price-product.cost)/product.price*100)}%`:"—"}</td><td className={product.stock<=product.lowStockThreshold?"low-text":""}>{product.stock}</td><td>{product.active?"Active":"Archived"}</td><td><button className="table-action" onClick={()=>toggle(product)}>{product.active?"Archive":"Restore"}</button></td></tr>)}</tbody></table></div></article>}
+function Transactions({
+  sales,
+  setSelected,
+  refund,
+  compact = false
+}: {
+  sales: Sale[];
+  setSelected: (v: Sale) => void;
+  refund: (v: Sale) => void;
+  compact?: boolean;
+}) {
+  return (
+    <article className="transactions-card operations-card">
+      <div className="card-title">
+        <div>
+          <p>Financial ledger</p>
+          <h2>{compact ? "Recent transactions" : "Sales transactions"}</h2>
+        </div>
+        <span>{sales.length} records</span>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {["Receipt", "Date", "Cashier", "Tender", "Total", "Refunded", "Status", "Actions"].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sales.map((sale) => (
+              <tr key={sale.id}>
+                <td>
+                  <button className="link-button" onClick={() => setSelected(sale)}>
+                    {sale.receiptNumber}
+                  </button>
+                </td>
+                <td>{shortDate(sale.createdAt)}</td>
+                <td>{sale.employeeName}</td>
+                <td>{sale.payments.map((p) => p.method).join(" + ") || "—"}</td>
+                <td>{money(sale.total)}</td>
+                <td>{money(sale.refundedAmount)}</td>
+                <td>
+                  <span className={sale.status === "completed" ? "complete-status" : "refund-status"}>
+                    {sale.status.replaceAll("_", " ")}
+                  </span>
+                </td>
+                <td>
+                  <button className="table-action" onClick={() => setSelected(sale)}>
+                    Details
+                  </button>
+                  {sale.status !== "refunded" && !compact && (
+                    <button className="table-action danger-link" onClick={() => refund(sale)}>
+                      Refund
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!sales.length && <Empty text="No transactions match this date range." />}
+    </article>
+  );
+}
 
-function Inventory({products,movements,adjust}:{products:Product[];movements:Operations["inventoryMovements"];adjust:()=>void}){const low=products.filter(p=>p.active&&p.stock<=p.lowStockThreshold);return <><div className="inventory-summary"><article><span>On-hand units</span><strong>{products.reduce((n,p)=>n+p.stock,0)}</strong></article><article><span>Inventory value</span><strong>{money(products.reduce((n,p)=>n+p.stock*p.cost,0))}</strong></article><article className="alert-card"><span>Low-stock products</span><strong>{low.length}</strong></article><button className="primary-small" onClick={adjust}>＋ Stock adjustment</button></div><div className="two-column"><article className="operations-card"><div className="card-title"><div><p>Attention needed</p><h2>Low stock</h2></div></div>{low.map(product=><div className="stock-row" key={product.id}><span style={{background:product.color}}>{product.icon}</span><div><strong>{product.name}</strong><small>{product.sku} · threshold {product.lowStockThreshold}</small></div><b>{product.stock} left</b></div>)}{!low.length&&<Empty text="All stock levels are healthy."/>}</article><article className="operations-card"><div className="card-title"><div><p>Ledger</p><h2>Recent movements</h2></div></div>{movements.slice(0,10).map(move=><div className="movement-row" key={move.id}><div><strong>{products.find(p=>p.id===move.productId)?.name??"Archived product"}</strong><small>{move.type.replaceAll("_"," ")} · {move.reason}</small></div><b className={move.quantity>0?"positive":"low-text"}>{move.quantity>0?"+":""}{move.quantity}</b></div>)}{!movements.length&&<Empty text="No inventory movements yet."/>}</article></div></>}
+function Products({
+  products,
+  add,
+  request,
+  reload,
+  notify
+}: {
+  products: Product[];
+  add: () => void;
+  request: RequestFn;
+  reload: () => Promise<void>;
+  notify: (v: string) => void;
+}) {
+  async function toggle(product: Product) {
+    try {
+      await request("/api/products", { id: product.id, active: !product.active }, "PATCH");
+      await reload();
+      notify(`${product.name} ${product.active ? "archived" : "restored"}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Update failed");
+    }
+  }
+  return (
+    <article className="operations-card">
+      <div className="section-toolbar">
+        <div>
+          <p>Catalogue</p>
+          <h2>{products.filter((p) => p.active).length} active products</h2>
+        </div>
+        <button className="primary-small" onClick={add}>
+          ＋ Add product
+        </button>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {["Product", "SKU / barcode", "Category", "Cost", "Price", "Margin", "Stock", "State", ""].map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {products.map((product) => (
+              <tr key={product.id} className={!product.active ? "muted-row" : ""}>
+                <td>
+                  <span className="mini-product" style={{ background: product.color }}>
+                    {product.icon}
+                  </span>
+                  <strong>{product.name}</strong>
+                </td>
+                <td>
+                  {product.sku}
+                  <small>{product.barcode || "No barcode"}</small>
+                </td>
+                <td>{product.category}</td>
+                <td>{money(product.cost)}</td>
+                <td>{money(product.price)}</td>
+                <td>
+                  {product.price ? `${Math.round(((product.price - product.cost) / product.price) * 100)}%` : "—"}
+                </td>
+                <td className={product.stock <= product.lowStockThreshold ? "low-text" : ""}>{product.stock}</td>
+                <td>{product.active ? "Active" : "Archived"}</td>
+                <td>
+                  <button className="table-action" onClick={() => toggle(product)}>
+                    {product.active ? "Archive" : "Restore"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  );
+}
 
-function Customers({customers,add}:{customers:Customer[];add:()=>void}){return <article className="operations-card"><div className="section-toolbar"><div><p>Customer directory</p><h2>{customers.length} customers</h2></div><button className="primary-small" onClick={add}>＋ Add customer</button></div><div className="customer-grid">{customers.map(customer=><article key={customer.id}><div className="customer-avatar">{customer.name.split(" ").map(v=>v[0]).slice(0,2).join("")}</div><h3>{customer.name}</h3><p>{customer.email||customer.phone||"No contact details"}</p><dl><div><dt>Visits</dt><dd>{customer.visits}</dd></div><div><dt>Spent</dt><dd>{money(customer.totalSpent)}</dd></div><div><dt>Points</dt><dd>{customer.loyaltyPoints}</dd></div></dl></article>)}</div></article>}
+function Inventory({
+  products,
+  movements,
+  adjust
+}: {
+  products: Product[];
+  movements: Operations["inventoryMovements"];
+  adjust: () => void;
+}) {
+  const low = products.filter((p) => p.active && p.stock <= p.lowStockThreshold);
+  return (
+    <>
+      <div className="inventory-summary">
+        <article>
+          <span>On-hand units</span>
+          <strong>{products.reduce((n, p) => n + p.stock, 0)}</strong>
+        </article>
+        <article>
+          <span>Inventory value</span>
+          <strong>{money(products.reduce((n, p) => n + p.stock * p.cost, 0))}</strong>
+        </article>
+        <article className="alert-card">
+          <span>Low-stock products</span>
+          <strong>{low.length}</strong>
+        </article>
+        <button className="primary-small" onClick={adjust}>
+          ＋ Stock adjustment
+        </button>
+      </div>
+      <div className="two-column">
+        <article className="operations-card">
+          <div className="card-title">
+            <div>
+              <p>Attention needed</p>
+              <h2>Low stock</h2>
+            </div>
+          </div>
+          {low.map((product) => (
+            <div className="stock-row" key={product.id}>
+              <span style={{ background: product.color }}>{product.icon}</span>
+              <div>
+                <strong>{product.name}</strong>
+                <small>
+                  {product.sku} · threshold {product.lowStockThreshold}
+                </small>
+              </div>
+              <b>{product.stock} left</b>
+            </div>
+          ))}
+          {!low.length && <Empty text="All stock levels are healthy." />}
+        </article>
+        <article className="operations-card">
+          <div className="card-title">
+            <div>
+              <p>Ledger</p>
+              <h2>Recent movements</h2>
+            </div>
+          </div>
+          {movements.slice(0, 10).map((move) => (
+            <div className="movement-row" key={move.id}>
+              <div>
+                <strong>{products.find((p) => p.id === move.productId)?.name ?? "Archived product"}</strong>
+                <small>
+                  {move.type.replaceAll("_", " ")} · {move.reason}
+                </small>
+              </div>
+              <b className={move.quantity > 0 ? "positive" : "low-text"}>
+                {move.quantity > 0 ? "+" : ""}
+                {move.quantity}
+              </b>
+            </div>
+          ))}
+          {!movements.length && <Empty text="No inventory movements yet." />}
+        </article>
+      </div>
+    </>
+  );
+}
 
-function Reports({ops}:{ops:Operations}){const stockValue=ops.products.reduce((n,p)=>n+p.stock*p.cost,0);return <><div className="report-banner"><div><p>Reconciled performance</p><h2>{money(ops.summary.netSales)}</h2><small>Net sales after {money(ops.summary.refunds)} in refunds</small></div><div><span>Gross profit<strong>{money(ops.summary.grossProfit)}</strong></span><span>Tax liability<strong>{money(ops.summary.tax)}</strong></span><span>Inventory value<strong>{money(stockValue)}</strong></span></div></div><div className="report-grid"><article className="operations-card"><h2>Payment reconciliation</h2>{Object.entries(ops.summary.tender).map(([method,value])=><div className="report-line" key={method}><span>{method}</span><strong>{money(value)}</strong></div>)}<div className="report-line total-line"><span>Gross collected</span><strong>{money(Object.values(ops.summary.tender).reduce((a,b)=>a+b,0))}</strong></div></article><article className="operations-card"><h2>Shift reconciliation</h2>{ops.shifts.slice(0,8).map(shift=><div className="report-line" key={shift.id}><span>{shift.registerCode} · {shortDate(shift.openedAt)}<small>{shift.status}</small></span><strong>{shift.countedCash==null?money(shift.expectedCash):`${money(shift.countedCash-shift.expectedCash)} variance`}</strong></div>)}</article><article className="operations-card"><h2>Returns by reason</h2>{ops.returns.slice(0,8).map(item=><div className="report-line" key={item.id}><span>{item.reason}<small>{item.receiptNumber}</small></span><strong>{money(item.amount)}</strong></div>)}{!ops.returns.length&&<Empty text="No returns in the ledger."/>}</article></div></>}
+function Customers({ customers, add }: { customers: Customer[]; add: () => void }) {
+  return (
+    <article className="operations-card">
+      <div className="section-toolbar">
+        <div>
+          <p>Customer directory</p>
+          <h2>{customers.length} customers</h2>
+        </div>
+        <button className="primary-small" onClick={add}>
+          ＋ Add customer
+        </button>
+      </div>
+      <div className="customer-grid">
+        {customers.map((customer) => (
+          <article key={customer.id}>
+            <div className="customer-avatar">
+              {customer.name
+                .split(" ")
+                .map((v) => v[0])
+                .slice(0, 2)
+                .join("")}
+            </div>
+            <h3>{customer.name}</h3>
+            <p>{customer.email || customer.phone || "No contact details"}</p>
+            <dl>
+              <div>
+                <dt>Visits</dt>
+                <dd>{customer.visits}</dd>
+              </div>
+              <div>
+                <dt>Spent</dt>
+                <dd>{money(customer.totalSpent)}</dd>
+              </div>
+              <div>
+                <dt>Points</dt>
+                <dd>{customer.loyaltyPoints}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+    </article>
+  );
+}
 
-const rolePermissions:Record<string,string[]>={Owner:["All access"],Manager:["Sales","Refunds","Drawer","Inventory","Reports","Staff"],Supervisor:["Sales","Refunds","Drawer","Reports"],Cashier:["Sales","Own shift"],Inventory:["Products","Inventory"],Accountant:["Reports","Exports"],Auditor:["Read-only audit"]};
-function Settings({ops,addEmployee,request,reload,notify}:{ops:Operations;addEmployee:()=>void;request:RequestFn;reload:()=>Promise<void>;notify:(v:string)=>void}){async function toggle(employee:Employee){try{await request("/api/employees",{id:employee.id,active:!employee.active},"PATCH");await reload();notify(`${employee.name} ${employee.active?"disabled":"enabled"}`);}catch(e){notify(e instanceof Error?e.message:"Update failed")}}return <><div className="settings-grid"><article className="operations-card"><div className="section-toolbar"><div><p>Team & access</p><h2>Employees</h2></div><button className="primary-small" onClick={addEmployee}>＋ Add employee</button></div>{ops.employees.map(employee=><div className="employee-row" key={employee.id}><div className="customer-avatar">{employee.name.split(" ").map(v=>v[0]).join("")}</div><div><strong>{employee.name}</strong><small>{employee.email}</small></div><span>{employee.role}</span><button className="table-action" onClick={()=>toggle(employee)}>{employee.active?"Disable":"Enable"}</button></div>)}</article><article className="operations-card"><p className="eyebrow">Permission policy</p><h2>Role capabilities</h2>{Object.entries(rolePermissions).map(([role,rights])=><div className="permission-row" key={role}><strong>{role}</strong><span>{rights.join(" · ")}</span></div>)}</article></div><div className="settings-grid"><article className="operations-card"><p className="eyebrow">Hardware & connectivity</p><h2>Register 02</h2><Status label="Barcode scanner" state="Ready"/><Status label="Thermal printer" state="Configured"/><Status label="Cash drawer" state="Printer-triggered"/><Status label="Card terminal" state="Manual mode"/><Status label="Offline queue" state="Online-only" warning/></article><article className="operations-card audit-card"><p className="eyebrow">Immutable activity history</p><h2>Audit log</h2>{ops.auditLogs.slice(0,10).map(log=><div className="audit-row" key={log.id}><i/><div><strong>{log.action.replaceAll("."," ")}</strong><span>{log.details}</span><small>{log.actor} · {shortDate(log.createdAt)}</small></div></div>)}{!ops.auditLogs.length&&<Empty text="Sensitive activity will appear here."/>}</article></div></>}
-function Status({label,state,warning=false}:{label:string;state:string;warning?:boolean}){return <div className="status-row"><span>{label}</span><strong className={warning?"warning-pill":"ready-pill"}>{state}</strong></div>}
-function Empty({text}:{text:string}){return <div className="inline-empty">{text}</div>}
+function Reports({ ops }: { ops: Operations }) {
+  const stockValue = ops.products.reduce((n, p) => n + p.stock * p.cost, 0);
+  return (
+    <>
+      <div className="report-banner">
+        <div>
+          <p>Reconciled performance</p>
+          <h2>{money(ops.summary.netSales)}</h2>
+          <small>Net sales after {money(ops.summary.refunds)} in refunds</small>
+        </div>
+        <div>
+          <span>
+            Gross profit<strong>{money(ops.summary.grossProfit)}</strong>
+          </span>
+          <span>
+            Tax liability<strong>{money(ops.summary.tax)}</strong>
+          </span>
+          <span>
+            Inventory value<strong>{money(stockValue)}</strong>
+          </span>
+        </div>
+      </div>
+      <div className="report-grid">
+        <article className="operations-card">
+          <h2>Payment reconciliation</h2>
+          {Object.entries(ops.summary.tender).map(([method, value]) => (
+            <div className="report-line" key={method}>
+              <span>{method}</span>
+              <strong>{money(value)}</strong>
+            </div>
+          ))}
+          <div className="report-line total-line">
+            <span>Gross collected</span>
+            <strong>{money(Object.values(ops.summary.tender).reduce((a, b) => a + b, 0))}</strong>
+          </div>
+        </article>
+        <article className="operations-card">
+          <h2>Shift reconciliation</h2>
+          {ops.shifts.slice(0, 8).map((shift) => (
+            <div className="report-line" key={shift.id}>
+              <span>
+                {shift.registerCode} · {shortDate(shift.openedAt)}
+                <small>{shift.status}</small>
+              </span>
+              <strong>
+                {shift.countedCash == null
+                  ? money(shift.expectedCash)
+                  : `${money(shift.countedCash - shift.expectedCash)} variance`}
+              </strong>
+            </div>
+          ))}
+        </article>
+        <article className="operations-card">
+          <h2>Returns by reason</h2>
+          {ops.returns.slice(0, 8).map((item) => (
+            <div className="report-line" key={item.id}>
+              <span>
+                {item.reason}
+                <small>{item.receiptNumber}</small>
+              </span>
+              <strong>{money(item.amount)}</strong>
+            </div>
+          ))}
+          {!ops.returns.length && <Empty text="No returns in the ledger." />}
+        </article>
+      </div>
+    </>
+  );
+}
 
-function PaymentModal({total,cashReceived,setCashReceived,close,completeSale,processing,online}:{total:number;cashReceived:string;setCashReceived:(v:string)=>void;close:()=>void;completeSale:(v:string)=>void;processing:boolean;online:boolean}){const [method,setMethod]=useState("Cash");const received=Number(cashReceived)||0;return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="payment-modal"><button className="modal-close" onClick={close}>×</button><p>{online?"Checkout":"Offline cash checkout"}</p><h2>Take payment</h2><div className="amount-due"><span>Amount due</span><strong>{money(total)}</strong></div><div className="payment-methods">{["Cash","Card","Split"].map(m=><button disabled={!online&&m!=="Cash"} className={method===m?"chosen":""} key={m} onClick={()=>setMethod(m)}><span>{m==="Cash"?"▱":m==="Card"?"▰":"◫"}</span>{m}</button>)}</div>{method==="Cash"?<><label className="cash-input"><span>Cash received</span><div><b>{displayConfig.currency}</b><input autoFocus value={cashReceived} onChange={e=>setCashReceived(e.target.value)} inputMode="decimal"/></div></label><div className="quick-cash">{[Math.ceil(total),20,50,100].filter((n,i,a)=>a.indexOf(n)===i).map(n=><button key={n} onClick={()=>setCashReceived(String(n))}>{money(n)}</button>)}</div><div className="change-row"><span>{online?"Change due":"Change due · sale will sync later"}</span><strong>{money(Math.max(0,received-total))}</strong></div></>:<div className="terminal-message"><span>{method==="Card"?"▣":"◫"}</span><strong>{method==="Card"?"Ready for terminal":"50% cash · 50% card"}</strong><small>{method==="Card"?"Complete on the connected terminal, then confirm.":"Both tender entries will be reconciled separately."}</small></div>}<button className="complete-payment" disabled={processing||(method==="Cash"&&received<total)} onClick={()=>completeSale(method)}>{processing?"Processing…":online?`Complete ${method.toLowerCase()} payment`:"Queue offline cash sale"}</button></section></div>}
+const rolePermissions: Record<string, string[]> = {
+  Owner: ["All access"],
+  Manager: ["Sales", "Refunds", "Drawer", "Inventory", "Reports", "Staff"],
+  Supervisor: ["Sales", "Refunds", "Drawer", "Reports"],
+  Cashier: ["Sales", "Own shift"],
+  Inventory: ["Products", "Inventory"],
+  Accountant: ["Reports", "Exports"],
+  Auditor: ["Read-only audit"]
+};
+function Settings({
+  ops,
+  addEmployee,
+  request,
+  reload,
+  notify
+}: {
+  ops: Operations;
+  addEmployee: () => void;
+  request: RequestFn;
+  reload: () => Promise<void>;
+  notify: (v: string) => void;
+}) {
+  async function toggle(employee: Employee) {
+    try {
+      await request("/api/employees", { id: employee.id, active: !employee.active }, "PATCH");
+      await reload();
+      notify(`${employee.name} ${employee.active ? "disabled" : "enabled"}`);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Update failed");
+    }
+  }
+  return (
+    <>
+      <div className="settings-grid">
+        <article className="operations-card">
+          <div className="section-toolbar">
+            <div>
+              <p>Team & access</p>
+              <h2>Employees</h2>
+            </div>
+            <button className="primary-small" onClick={addEmployee}>
+              ＋ Add employee
+            </button>
+          </div>
+          {ops.employees.map((employee) => (
+            <div className="employee-row" key={employee.id}>
+              <div className="customer-avatar">
+                {employee.name
+                  .split(" ")
+                  .map((v) => v[0])
+                  .join("")}
+              </div>
+              <div>
+                <strong>{employee.name}</strong>
+                <small>{employee.email}</small>
+              </div>
+              <span>{employee.role}</span>
+              <button className="table-action" onClick={() => toggle(employee)}>
+                {employee.active ? "Disable" : "Enable"}
+              </button>
+            </div>
+          ))}
+        </article>
+        <article className="operations-card">
+          <p className="eyebrow">Permission policy</p>
+          <h2>Role capabilities</h2>
+          {Object.entries(rolePermissions).map(([role, rights]) => (
+            <div className="permission-row" key={role}>
+              <strong>{role}</strong>
+              <span>{rights.join(" · ")}</span>
+            </div>
+          ))}
+        </article>
+      </div>
+      <div className="settings-grid">
+        <article className="operations-card">
+          <p className="eyebrow">Hardware & connectivity</p>
+          <h2>Register 02</h2>
+          <Status label="Barcode scanner" state="Ready" />
+          <Status label="Thermal printer" state="Configured" />
+          <Status label="Cash drawer" state="Printer-triggered" />
+          <Status label="Card terminal" state="Manual mode" />
+          <Status label="Offline queue" state="Online-only" warning />
+        </article>
+        <article className="operations-card audit-card">
+          <p className="eyebrow">Immutable activity history</p>
+          <h2>Audit log</h2>
+          {ops.auditLogs.slice(0, 10).map((log) => (
+            <div className="audit-row" key={log.id}>
+              <i />
+              <div>
+                <strong>{log.action.replaceAll(".", " ")}</strong>
+                <span>{log.details}</span>
+                <small>
+                  {log.actor} · {shortDate(log.createdAt)}
+                </small>
+              </div>
+            </div>
+          ))}
+          {!ops.auditLogs.length && <Empty text="Sensitive activity will appear here." />}
+        </article>
+      </div>
+    </>
+  );
+}
+function Status({ label, state, warning = false }: { label: string; state: string; warning?: boolean }) {
+  return (
+    <div className="status-row">
+      <span>{label}</span>
+      <strong className={warning ? "warning-pill" : "ready-pill"}>{state}</strong>
+    </div>
+  );
+}
+function Empty({ text }: { text: string }) {
+  return <div className="inline-empty">{text}</div>;
+}
 
-function ReceiptModal({data,close}:{data:{sale:Sale;cart:CartLine[];method:string;tendered:number};close:()=>void}){const subtotal=data.cart.reduce((n,l)=>n+l.price*l.quantity,0);const tax=data.sale.tax;return <div className="modal-backdrop receipt-backdrop"><section className="receipt-modal"><div className="success-check">✓</div><p>Payment successful</p><h2>{money(data.sale.total)}</h2><div className="receipt-paper"><header><strong>{displayConfig.businessName.toUpperCase()}</strong><small>{displayConfig.storeName}</small><small>{data.sale.receiptNumber} · {new Date().toLocaleString(displayConfig.locale)}</small></header>{data.cart.map(line=><div className="receipt-line" key={line.id}><span>{line.quantity} × {line.name}</span><strong>{money(line.quantity*line.price)}</strong></div>)}<div className="receipt-totals"><span>Subtotal <strong>{money(subtotal)}</strong></span><span>Tax <strong>{money(tax)}</strong></span><span>Total <strong>{money(data.sale.total)}</strong></span><span>{data.method} <strong>{money(data.method==="Cash"?data.tendered:data.sale.total)}</strong></span>{data.method==="Cash"&&<span>Change <strong>{money(Math.max(0,data.tendered-data.sale.total))}</strong></span>}</div><footer>Thank you — see you again soon.</footer></div><div className="receipt-actions"><button onClick={()=>window.print()}>▣ Print receipt</button><button onClick={close}>Start new sale →</button></div></section></div>}
+function PaymentModal({
+  total,
+  cashReceived,
+  setCashReceived,
+  close,
+  completeSale,
+  processing,
+  online
+}: {
+  total: number;
+  cashReceived: string;
+  setCashReceived: (v: string) => void;
+  close: () => void;
+  completeSale: (v: string) => void;
+  processing: boolean;
+  online: boolean;
+}) {
+  const [method, setMethod] = useState("Cash");
+  const received = Number(cashReceived) || 0;
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <section className="payment-modal">
+        <button className="modal-close" onClick={close}>
+          ×
+        </button>
+        <p>{online ? "Checkout" : "Offline cash checkout"}</p>
+        <h2>Take payment</h2>
+        <div className="amount-due">
+          <span>Amount due</span>
+          <strong>{money(total)}</strong>
+        </div>
+        <div className="payment-methods">
+          {["Cash", "Card", "Split"].map((m) => (
+            <button
+              disabled={!online && m !== "Cash"}
+              className={method === m ? "chosen" : ""}
+              key={m}
+              onClick={() => setMethod(m)}
+            >
+              <span>{m === "Cash" ? "▱" : m === "Card" ? "▰" : "◫"}</span>
+              {m}
+            </button>
+          ))}
+        </div>
+        {method === "Cash" ? (
+          <>
+            <label className="cash-input">
+              <span>Cash received</span>
+              <div>
+                <b>{displayConfig.currency}</b>
+                <input
+                  autoFocus
+                  value={cashReceived}
+                  onChange={(e) => setCashReceived(e.target.value)}
+                  inputMode="decimal"
+                />
+              </div>
+            </label>
+            <div className="quick-cash">
+              {[Math.ceil(total), 20, 50, 100]
+                .filter((n, i, a) => a.indexOf(n) === i)
+                .map((n) => (
+                  <button key={n} onClick={() => setCashReceived(String(n))}>
+                    {money(n)}
+                  </button>
+                ))}
+            </div>
+            <div className="change-row">
+              <span>{online ? "Change due" : "Change due · sale will sync later"}</span>
+              <strong>{money(Math.max(0, received - total))}</strong>
+            </div>
+          </>
+        ) : (
+          <div className="terminal-message">
+            <span>{method === "Card" ? "▣" : "◫"}</span>
+            <strong>{method === "Card" ? "Ready for terminal" : "50% cash · 50% card"}</strong>
+            <small>
+              {method === "Card"
+                ? "Complete on the connected terminal, then confirm."
+                : "Both tender entries will be reconciled separately."}
+            </small>
+          </div>
+        )}
+        <button
+          className="complete-payment"
+          disabled={processing || (method === "Cash" && received < total)}
+          onClick={() => completeSale(method)}
+        >
+          {processing ? "Processing…" : online ? `Complete ${method.toLowerCase()} payment` : "Queue offline cash sale"}
+        </button>
+      </section>
+    </div>
+  );
+}
 
-function ActionModal({kind,close,products,shift,request,reload,notify}:{kind:string;close:()=>void;products:Product[];shift:Shift|null;request:RequestFn;reload:()=>Promise<void>;notify:(v:string)=>void}){const [busy,setBusy]=useState(false);async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);const fd=new FormData(e.currentTarget);try{if(kind==="product")await request("/api/products",Object.fromEntries(fd));if(kind==="inventory")await request("/api/inventory",{productId:Number(fd.get("productId")),quantity:Number(fd.get("quantity")),reason:fd.get("reason")});if(kind==="customer")await request("/api/customers",Object.fromEntries(fd));if(kind==="employee")await request("/api/employees",Object.fromEntries(fd));if(kind==="cash")await request("/api/shifts",{action:fd.get("action"),amount:Number(fd.get("amount")),reason:fd.get("reason")});if(kind==="close")await request("/api/shifts",{action:"close",countedCash:Number(fd.get("countedCash"))});await reload();close();notify(kind==="close"?"Shift counted and closed":"Operation saved and audited");}catch(error){notify(error instanceof Error?error.message:"Operation failed");}finally{setBusy(false)}}const titles:Record<string,string>={product:"Add product",inventory:"Stock adjustment",customer:"Add customer",cash:"Cash drawer movement",close:"Blind shift close",employee:"Add employee"};return <div className="modal-backdrop"><form className="form-modal" onSubmit={submit}><button type="button" className="modal-close" onClick={close}>×</button><p>Operations</p><h2>{titles[kind]}</h2>{kind==="product"&&<><Field name="name" label="Product name" required/><div className="form-split"><Field name="sku" label="SKU" required/><Field name="barcode" label="Barcode"/></div><div className="form-split"><Field name="category" label="Category" required/><Field name="stock" label="Opening stock" type="number" value="0"/></div><div className="form-split"><Field name="cost" label="Unit cost" type="number" step="0.01"/><Field name="price" label="Selling price" type="number" step="0.01" required/></div><Field name="lowStockThreshold" label="Low-stock threshold" type="number" value="8"/></>}{kind==="inventory"&&<><label>Product<select name="productId" required>{products.filter(p=>p.active).map(p=><option key={p.id} value={p.id}>{p.name} · {p.stock} on hand</option>)}</select></label><Field name="quantity" label="Quantity change (+ receive / − remove)" type="number" required/><Field name="reason" label="Reason" required/></>}{kind==="customer"&&<><Field name="name" label="Full name" required/><Field name="email" label="Email" type="email"/><Field name="phone" label="Phone"/></>}{kind==="employee"&&<><Field name="name" label="Full name" required/><Field name="email" label="Work email" type="email" required/><label>Role<select name="role">{Object.keys(rolePermissions).map(role=><option key={role}>{role}</option>)}</select></label><Field name="password" label="Temporary password (12+ characters)" type="password" required/></>}{kind==="cash"&&<><div className="form-callout">Expected drawer balance: <strong>{money(shift?.expectedCash??0)}</strong></div><label>Movement<select name="action"><option value="cash_in">Cash paid in</option><option value="cash_out">Cash paid out</option><option value="safe_drop">Safe drop</option><option value="petty_cash">Petty cash expense</option></select></label><Field name="amount" label="Amount" type="number" step="0.01" required/><Field name="reason" label="Reason" required/></>}{kind==="close"&&<><div className="form-callout">Enter the physically counted cash. The expected amount stays hidden until submission.</div><Field name="countedCash" label="Counted cash" type="number" step="0.01" required/></>}<button className="complete-payment" disabled={busy}>{busy?"Saving…":"Save operation"}</button></form></div>}
-function Field({name,label,type="text",step,value,required=false}:{name:string;label:string;type?:string;step?:string;value?:string;required?:boolean}){return <label>{label}<input name={name} type={type} step={step} defaultValue={value} required={required}/></label>}
+function ReceiptModal({
+  data,
+  close
+}: {
+  data: { sale: Sale; cart: CartLine[]; method: string; tendered: number };
+  close: () => void;
+}) {
+  const subtotal = data.cart.reduce((n, l) => n + l.price * l.quantity, 0);
+  const tax = data.sale.tax;
+  return (
+    <div className="modal-backdrop receipt-backdrop">
+      <section className="receipt-modal">
+        <div className="success-check">✓</div>
+        <p>Payment successful</p>
+        <h2>{money(data.sale.total)}</h2>
+        <div className="receipt-paper">
+          <header>
+            <strong>{displayConfig.businessName.toUpperCase()}</strong>
+            <small>{displayConfig.storeName}</small>
+            <small>
+              {data.sale.receiptNumber} · {new Date().toLocaleString(displayConfig.locale)}
+            </small>
+          </header>
+          {data.cart.map((line) => (
+            <div className="receipt-line" key={line.id}>
+              <span>
+                {line.quantity} × {line.name}
+              </span>
+              <strong>{money(line.quantity * line.price)}</strong>
+            </div>
+          ))}
+          <div className="receipt-totals">
+            <span>
+              Subtotal <strong>{money(subtotal)}</strong>
+            </span>
+            <span>
+              Tax <strong>{money(tax)}</strong>
+            </span>
+            <span>
+              Total <strong>{money(data.sale.total)}</strong>
+            </span>
+            <span>
+              {data.method} <strong>{money(data.method === "Cash" ? data.tendered : data.sale.total)}</strong>
+            </span>
+            {data.method === "Cash" && (
+              <span>
+                Change <strong>{money(Math.max(0, data.tendered - data.sale.total))}</strong>
+              </span>
+            )}
+          </div>
+          <footer>Thank you — see you again soon.</footer>
+        </div>
+        <div className="receipt-actions">
+          <button onClick={() => window.print()}>▣ Print receipt</button>
+          <button onClick={close}>Start new sale →</button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
-function SaleModal({sale,close,refund}:{sale:Sale;close:()=>void;refund:()=>void}){return <div className="modal-backdrop"><section className="form-modal sale-detail"><button className="modal-close" onClick={close}>×</button><p>Transaction detail</p><h2>{sale.receiptNumber}</h2><div className="detail-meta"><span>{shortDate(sale.createdAt)}</span><span>{sale.employeeName}</span><span>{sale.payments.map(p=>p.method).join(" + ")}</span></div>{sale.lines.map(line=><div className="detail-line" key={line.id}><div><strong>{line.quantity} × {line.productName}</strong><small>{line.sku}{line.returnedQuantity?` · ${line.returnedQuantity} returned`:""}</small></div><b>{money(line.lineTotal)}</b></div>)}<div className="detail-totals"><span>Subtotal<b>{money(sale.subtotal)}</b></span><span>Tax<b>{money(sale.tax)}</b></span><span>Refunded<b>−{money(sale.refundedAmount)}</b></span><span>Total retained<b>{money(sale.total-sale.refundedAmount)}</b></span></div><div className="modal-footer"><button onClick={()=>window.print()}>Print receipt</button>{sale.status!=="refunded"&&<button className="danger-button" onClick={refund}>Process refund</button>}</div></section></div>}
+function ActionModal({
+  kind,
+  close,
+  products,
+  shift,
+  request,
+  reload,
+  notify
+}: {
+  kind: string;
+  close: () => void;
+  products: Product[];
+  shift: Shift | null;
+  request: RequestFn;
+  reload: () => Promise<void>;
+  notify: (v: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true);
+    const fd = new FormData(e.currentTarget);
+    try {
+      if (kind === "product") await request("/api/products", Object.fromEntries(fd));
+      if (kind === "inventory")
+        await request("/api/inventory", {
+          productId: Number(fd.get("productId")),
+          quantity: Number(fd.get("quantity")),
+          reason: fd.get("reason")
+        });
+      if (kind === "customer") await request("/api/customers", Object.fromEntries(fd));
+      if (kind === "employee") await request("/api/employees", Object.fromEntries(fd));
+      if (kind === "cash")
+        await request("/api/shifts", {
+          action: fd.get("action"),
+          amount: Number(fd.get("amount")),
+          reason: fd.get("reason")
+        });
+      if (kind === "close")
+        await request("/api/shifts", { action: "close", countedCash: Number(fd.get("countedCash")) });
+      await reload();
+      close();
+      notify(kind === "close" ? "Shift counted and closed" : "Operation saved and audited");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Operation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const titles: Record<string, string> = {
+    product: "Add product",
+    inventory: "Stock adjustment",
+    customer: "Add customer",
+    cash: "Cash drawer movement",
+    close: "Blind shift close",
+    employee: "Add employee"
+  };
+  return (
+    <div className="modal-backdrop">
+      <form className="form-modal" onSubmit={submit}>
+        <button type="button" className="modal-close" onClick={close}>
+          ×
+        </button>
+        <p>Operations</p>
+        <h2>{titles[kind]}</h2>
+        {kind === "product" && (
+          <>
+            <Field name="name" label="Product name" required />
+            <div className="form-split">
+              <Field name="sku" label="SKU" required />
+              <Field name="barcode" label="Barcode" />
+            </div>
+            <div className="form-split">
+              <Field name="category" label="Category" required />
+              <Field name="stock" label="Opening stock" type="number" value="0" />
+            </div>
+            <div className="form-split">
+              <Field name="cost" label="Unit cost" type="number" step="0.01" />
+              <Field name="price" label="Selling price" type="number" step="0.01" required />
+            </div>
+            <Field name="lowStockThreshold" label="Low-stock threshold" type="number" value="8" />
+          </>
+        )}
+        {kind === "inventory" && (
+          <>
+            <label>
+              Product
+              <select name="productId" required>
+                {products
+                  .filter((p) => p.active)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.stock} on hand
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <Field name="quantity" label="Quantity change (+ receive / − remove)" type="number" required />
+            <Field name="reason" label="Reason" required />
+          </>
+        )}
+        {kind === "customer" && (
+          <>
+            <Field name="name" label="Full name" required />
+            <Field name="email" label="Email" type="email" />
+            <Field name="phone" label="Phone" />
+          </>
+        )}
+        {kind === "employee" && (
+          <>
+            <Field name="name" label="Full name" required />
+            <Field name="email" label="Work email" type="email" required />
+            <label>
+              Role
+              <select name="role">
+                {Object.keys(rolePermissions).map((role) => (
+                  <option key={role}>{role}</option>
+                ))}
+              </select>
+            </label>
+            <Field name="password" label="Temporary password (12+ characters)" type="password" required />
+          </>
+        )}
+        {kind === "cash" && (
+          <>
+            <div className="form-callout">
+              Expected drawer balance: <strong>{money(shift?.expectedCash ?? 0)}</strong>
+            </div>
+            <label>
+              Movement
+              <select name="action">
+                <option value="cash_in">Cash paid in</option>
+                <option value="cash_out">Cash paid out</option>
+                <option value="safe_drop">Safe drop</option>
+                <option value="petty_cash">Petty cash expense</option>
+              </select>
+            </label>
+            <Field name="amount" label="Amount" type="number" step="0.01" required />
+            <Field name="reason" label="Reason" required />
+          </>
+        )}
+        {kind === "close" && (
+          <>
+            <div className="form-callout">
+              Enter the physically counted cash. The expected amount stays hidden until submission.
+            </div>
+            <Field name="countedCash" label="Counted cash" type="number" step="0.01" required />
+          </>
+        )}
+        <button className="complete-payment" disabled={busy}>
+          {busy ? "Saving…" : "Save operation"}
+        </button>
+      </form>
+    </div>
+  );
+}
+function Field({
+  name,
+  label,
+  type = "text",
+  step,
+  value,
+  required = false
+}: {
+  name: string;
+  label: string;
+  type?: string;
+  step?: string;
+  value?: string;
+  required?: boolean;
+}) {
+  return (
+    <label>
+      {label}
+      <input name={name} type={type} step={step} defaultValue={value} required={required} />
+    </label>
+  );
+}
 
-function RefundModal({sale,close,request,reload,notify}:{sale:Sale;close:()=>void;request:RequestFn;reload:()=>Promise<void>;notify:(v:string)=>void}){const eligible=sale.lines.filter(l=>l.quantity>l.returnedQuantity);const [selected,setSelected]=useState<Record<number,boolean>>(Object.fromEntries(eligible.map(l=>[l.id,true])));const [busy,setBusy]=useState(false);async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const fd=new FormData(e.currentTarget);const lines=eligible.filter(l=>selected[l.id]).map(l=>({saleLineId:l.id,quantity:Number(fd.get(`qty-${l.id}`)),restock:fd.get(`restock-${l.id}`)==="on"}));if(!lines.length)return notify("Select at least one item");setBusy(true);try{await request("/api/refunds",{saleId:sale.id,lines,reason:fd.get("reason"),method:fd.get("method")});await reload();close();notify("Refund completed and ledgers reconciled");}catch(error){notify(error instanceof Error?error.message:"Refund failed");}finally{setBusy(false)}}return <div className="modal-backdrop"><form className="form-modal refund-modal" onSubmit={submit}><button type="button" className="modal-close" onClick={close}>×</button><p>Return & refund</p><h2>{sale.receiptNumber}</h2>{eligible.map(line=><div className="refund-line" key={line.id}><input type="checkbox" checked={selected[line.id]??false} onChange={e=>setSelected({...selected,[line.id]:e.target.checked})}/><div><strong>{line.productName}</strong><small>{line.quantity-line.returnedQuantity} available · {money(line.unitPrice)} each</small></div><input name={`qty-${line.id}`} type="number" min="1" max={line.quantity-line.returnedQuantity} defaultValue="1"/><label className="check-label"><input name={`restock-${line.id}`} type="checkbox" defaultChecked/>Restock</label></div>)}<label>Refund method<select name="method"><option>Card</option><option>Cash</option></select></label><label>Return reason<select name="reason"><option>Customer changed mind</option><option>Damaged item</option><option>Incorrect item</option><option>Quality issue</option></select></label><button className="danger-submit" disabled={busy||!eligible.length}>{busy?"Processing…":"Complete refund"}</button></form></div>}
+function SaleModal({ sale, close, refund }: { sale: Sale; close: () => void; refund: () => void }) {
+  return (
+    <div className="modal-backdrop">
+      <section className="form-modal sale-detail">
+        <button className="modal-close" onClick={close}>
+          ×
+        </button>
+        <p>Transaction detail</p>
+        <h2>{sale.receiptNumber}</h2>
+        <div className="detail-meta">
+          <span>{shortDate(sale.createdAt)}</span>
+          <span>{sale.employeeName}</span>
+          <span>{sale.payments.map((p) => p.method).join(" + ")}</span>
+        </div>
+        {sale.lines.map((line) => (
+          <div className="detail-line" key={line.id}>
+            <div>
+              <strong>
+                {line.quantity} × {line.productName}
+              </strong>
+              <small>
+                {line.sku}
+                {line.returnedQuantity ? ` · ${line.returnedQuantity} returned` : ""}
+              </small>
+            </div>
+            <b>{money(line.lineTotal)}</b>
+          </div>
+        ))}
+        <div className="detail-totals">
+          <span>
+            Subtotal<b>{money(sale.subtotal)}</b>
+          </span>
+          <span>
+            Tax<b>{money(sale.tax)}</b>
+          </span>
+          <span>
+            Refunded<b>−{money(sale.refundedAmount)}</b>
+          </span>
+          <span>
+            Total retained<b>{money(sale.total - sale.refundedAmount)}</b>
+          </span>
+        </div>
+        <div className="modal-footer">
+          <button onClick={() => window.print()}>Print receipt</button>
+          {sale.status !== "refunded" && (
+            <button className="danger-button" onClick={refund}>
+              Process refund
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RefundModal({
+  sale,
+  close,
+  request,
+  reload,
+  notify
+}: {
+  sale: Sale;
+  close: () => void;
+  request: RequestFn;
+  reload: () => Promise<void>;
+  notify: (v: string) => void;
+}) {
+  const eligible = sale.lines.filter((l) => l.quantity > l.returnedQuantity);
+  const [selected, setSelected] = useState<Record<number, boolean>>(
+    Object.fromEntries(eligible.map((l) => [l.id, true]))
+  );
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const lines = eligible
+      .filter((l) => selected[l.id])
+      .map((l) => ({
+        saleLineId: l.id,
+        quantity: Number(fd.get(`qty-${l.id}`)),
+        restock: fd.get(`restock-${l.id}`) === "on"
+      }));
+    if (!lines.length) return notify("Select at least one item");
+    setBusy(true);
+    try {
+      await request("/api/refunds", { saleId: sale.id, lines, reason: fd.get("reason"), method: fd.get("method") });
+      await reload();
+      close();
+      notify("Refund completed and ledgers reconciled");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Refund failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop">
+      <form className="form-modal refund-modal" onSubmit={submit}>
+        <button type="button" className="modal-close" onClick={close}>
+          ×
+        </button>
+        <p>Return & refund</p>
+        <h2>{sale.receiptNumber}</h2>
+        {eligible.map((line) => (
+          <div className="refund-line" key={line.id}>
+            <input
+              type="checkbox"
+              checked={selected[line.id] ?? false}
+              onChange={(e) => setSelected({ ...selected, [line.id]: e.target.checked })}
+            />
+            <div>
+              <strong>{line.productName}</strong>
+              <small>
+                {line.quantity - line.returnedQuantity} available · {money(line.unitPrice)} each
+              </small>
+            </div>
+            <input
+              name={`qty-${line.id}`}
+              type="number"
+              min="1"
+              max={line.quantity - line.returnedQuantity}
+              defaultValue="1"
+            />
+            <label className="check-label">
+              <input name={`restock-${line.id}`} type="checkbox" defaultChecked />
+              Restock
+            </label>
+          </div>
+        ))}
+        <label>
+          Refund method
+          <select name="method">
+            <option>Card</option>
+            <option>Cash</option>
+          </select>
+        </label>
+        <label>
+          Return reason
+          <select name="reason">
+            <option>Customer changed mind</option>
+            <option>Damaged item</option>
+            <option>Incorrect item</option>
+            <option>Quality issue</option>
+          </select>
+        </label>
+        <button className="danger-submit" disabled={busy || !eligible.length}>
+          {busy ? "Processing…" : "Complete refund"}
+        </button>
+      </form>
+    </div>
+  );
+}

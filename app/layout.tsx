@@ -6,9 +6,13 @@ export const metadata: Metadata = {
   description: "Modern point of sale and retail operations.",
   manifest: "/manifest.webmanifest",
   other: { "codex-preview": "development" },
-  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+  icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
 }

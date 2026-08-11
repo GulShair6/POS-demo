@@ -84,15 +84,15 @@ Do not expose PostgreSQL publicly. The Compose file intentionally gives the data
 
 ## Configuration
 
-| Variable | Meaning | Example |
-|---|---|---|
-| `POS_BUSINESS_NAME` | Legal/trading name printed on receipts | `Atlas Coffee` |
-| `POS_STORE_NAME` | Current store label | `Downtown store` |
-| `POS_REGISTER_CODE` | Register whose open shift accepts sales | `REG-01` |
-| `POS_CURRENCY` | Three-letter ISO 4217 currency | `USD` |
-| `POS_LOCALE` | Browser formatting locale | `en-US` |
-| `POS_TAX_RATE` | Decimal tax rate | `0.0825` |
-| `SEED_DEMO_DATA` | Add sample products/customers on first boot | `false` |
+| Variable            | Meaning                                     | Example          |
+| ------------------- | ------------------------------------------- | ---------------- |
+| `POS_BUSINESS_NAME` | Legal/trading name printed on receipts      | `Atlas Coffee`   |
+| `POS_STORE_NAME`    | Current store label                         | `Downtown store` |
+| `POS_REGISTER_CODE` | Register whose open shift accepts sales     | `REG-01`         |
+| `POS_CURRENCY`      | Three-letter ISO 4217 currency              | `USD`            |
+| `POS_LOCALE`        | Browser formatting locale                   | `en-US`          |
+| `POS_TAX_RATE`      | Decimal tax rate                            | `0.0825`         |
+| `SEED_DEMO_DATA`    | Add sample products/customers on first boot | `false`          |
 
 Restart the application after changing runtime configuration:
 

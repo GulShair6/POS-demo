@@ -6,16 +6,45 @@ import { getDb } from "../db";
 import { employees } from "../db/schema";
 
 export type SessionUser = { id: number; name: string; email: string; role: string; exp: number };
-export type Permission = "pos.use" | "sales.read" | "refund.create" | "catalogue.manage" | "inventory.adjust" | "customers.manage" | "reports.read" | "employees.manage" | "audit.read";
+export type Permission =
+  | "pos.use"
+  | "sales.read"
+  | "refund.create"
+  | "catalogue.manage"
+  | "inventory.adjust"
+  | "customers.manage"
+  | "reports.read"
+  | "employees.manage"
+  | "audit.read";
 
 const permissions: Record<string, Permission[]> = {
-  Owner: ["pos.use","sales.read","refund.create","catalogue.manage","inventory.adjust","customers.manage","reports.read","employees.manage","audit.read"],
-  Manager: ["pos.use","sales.read","refund.create","catalogue.manage","inventory.adjust","customers.manage","reports.read","employees.manage","audit.read"],
-  Supervisor: ["pos.use","sales.read","refund.create","inventory.adjust","customers.manage","reports.read"],
-  Cashier: ["pos.use","sales.read","customers.manage"],
-  Inventory: ["pos.use","catalogue.manage","inventory.adjust","reports.read"],
-  Accountant: ["pos.use","sales.read","reports.read","audit.read"],
-  Auditor: ["pos.use","sales.read","reports.read","audit.read"]
+  Owner: [
+    "pos.use",
+    "sales.read",
+    "refund.create",
+    "catalogue.manage",
+    "inventory.adjust",
+    "customers.manage",
+    "reports.read",
+    "employees.manage",
+    "audit.read"
+  ],
+  Manager: [
+    "pos.use",
+    "sales.read",
+    "refund.create",
+    "catalogue.manage",
+    "inventory.adjust",
+    "customers.manage",
+    "reports.read",
+    "employees.manage",
+    "audit.read"
+  ],
+  Supervisor: ["pos.use", "sales.read", "refund.create", "inventory.adjust", "customers.manage", "reports.read"],
+  Cashier: ["pos.use", "sales.read", "customers.manage"],
+  Inventory: ["pos.use", "catalogue.manage", "inventory.adjust", "reports.read"],
+  Accountant: ["pos.use", "sales.read", "reports.read", "audit.read"],
+  Auditor: ["pos.use", "sales.read", "reports.read", "audit.read"]
 };
 
 export const SESSION_COOKIE = "atlas_session";
@@ -26,7 +55,9 @@ function secret() {
   return value;
 }
 
-function sign(value: string) { return createHmac("sha256", secret()).update(value).digest("base64url"); }
+function sign(value: string) {
+  return createHmac("sha256", secret()).update(value).digest("base64url");
+}
 
 export function createSessionToken(user: Omit<SessionUser, "exp">) {
   const body = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + 12 * 60 * 60 * 1000 })).toString("base64url");
@@ -43,7 +74,9 @@ export function readSessionToken(token?: string | null): SessionUser | null {
   try {
     const user = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as SessionUser;
     return user.exp > Date.now() && user.id > 0 && !!user.email ? user : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export async function getCurrentUser() {
@@ -52,7 +85,9 @@ export async function getCurrentUser() {
   if (!session) return null;
   const db = await getDb();
   const employee = (await db.select().from(employees).where(eq(employees.id, session.id)).limit(1))[0];
-  return employee?.active ? { id: employee.id, name: employee.name, email: employee.email, role: employee.role, exp: session.exp } : null;
+  return employee?.active
+    ? { id: employee.id, name: employee.name, email: employee.email, role: employee.role, exp: session.exp }
+    : null;
 }
 
 export function hasPermission(user: SessionUser, permission: Permission) {
@@ -69,17 +104,31 @@ function originIsValid(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   const forwardedHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
-  try { return !!forwardedHost && new URL(origin).host === forwardedHost; } catch { return false; }
+  try {
+    return !!forwardedHost && new URL(origin).host === forwardedHost;
+  } catch {
+    return false;
+  }
 }
 
-export async function authorize(request: Request, permission: Permission): Promise<{ user: SessionUser; response?: never } | { user?: never; response: Response }> {
+export async function authorize(
+  request: Request,
+  permission: Permission
+): Promise<{ user: SessionUser; response?: never } | { user?: never; response: Response }> {
   if (!originIsValid(request)) return { response: Response.json({ error: "Invalid request origin" }, { status: 403 }) };
   const session = readSessionToken(requestToken(request));
   if (!session) return { response: Response.json({ error: "Authentication required" }, { status: 401 }) };
   const db = await getDb();
   const employee = (await db.select().from(employees).where(eq(employees.id, session.id)).limit(1))[0];
   if (!employee?.active) return { response: Response.json({ error: "Authentication required" }, { status: 401 }) };
-  const user: SessionUser = { id: employee.id, name: employee.name, email: employee.email, role: employee.role, exp: session.exp };
-  if (!hasPermission(user, permission)) return { response: Response.json({ error: "You do not have permission for this action" }, { status: 403 }) };
+  const user: SessionUser = {
+    id: employee.id,
+    name: employee.name,
+    email: employee.email,
+    role: employee.role,
+    exp: session.exp
+  };
+  if (!hasPermission(user, permission))
+    return { response: Response.json({ error: "You do not have permission for this action" }, { status: 403 }) };
   return { user };
 }

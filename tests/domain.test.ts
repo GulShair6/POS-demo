@@ -4,7 +4,16 @@ import { calculateRefundLine, calculateSaleTotals, resolveSplitTender } from "..
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 
 test("sale totals round once per financial stage", () => {
-  assert.deepEqual(calculateSaleTotals([{ unitPrice: 4.5, quantity: 2 },{ unitPrice: 3.25, quantity: 1 }], 0.0825), { subtotal: 12.25, tax: 1.01, total: 13.26 });
+  assert.deepEqual(
+    calculateSaleTotals(
+      [
+        { unitPrice: 4.5, quantity: 2 },
+        { unitPrice: 3.25, quantity: 1 }
+      ],
+      0.0825
+    ),
+    { subtotal: 12.25, tax: 1.01, total: 13.26 }
+  );
 });
 
 test("split tender reconciles exactly and rejects mismatches", () => {

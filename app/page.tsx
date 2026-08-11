@@ -8,5 +8,10 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  return <PosApp currentUser={{ id: user.id, name: user.name, email: user.email, role: user.role }} config={getPublicConfig()} />;
+  return (
+    <PosApp
+      currentUser={{ id: user.id, name: user.name, email: user.email, role: user.role }}
+      config={getPublicConfig()}
+    />
+  );
 }
