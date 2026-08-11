@@ -1,0 +1,12 @@
+{
+  "name": "Atlas POS",
+  "short_name": "Atlas POS",
+  "description": "Retail checkout and store operations.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#14251f",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
