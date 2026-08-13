@@ -172,41 +172,33 @@ export async function GET(request: Request) {
     const to = bounds.to;
     const saleRange = saleDateRange(from, to);
     const returnRange = returnDateRange(from, to);
-    const [
-      catalogue,
-      rangeSales,
-      shifts,
-      cashMovements,
-      stockMovements,
-      customerRows,
-      employeeRows,
-      logs,
-      rangeReturns
-    ] = await Promise.all([
-      db.select().from(products).orderBy(asc(products.name)),
-      db.select().from(sales).where(saleRange).orderBy(desc(sales.id)),
-      db.select().from(registerShifts).orderBy(desc(registerShifts.id)).limit(50),
-      db.select().from(cashDrawerMovements).orderBy(desc(cashDrawerMovements.id)).limit(250),
-      db.select().from(inventoryMovements).orderBy(desc(inventoryMovements.id)).limit(500),
-      db.select().from(customers).orderBy(desc(customers.totalSpent)),
-      db.select().from(employees).orderBy(asc(employees.name)),
-      db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(150),
-      db.select().from(returns).where(returnRange).orderBy(desc(returns.id))
-    ]);
+    // Sequential queries: with DB_POOL_SIZE=1 + Supabase poolers, Promise.all can
+    // pipeline/hang and blow the Vercel time limit. Keep payloads small for demo hosting.
+    const catalogue = await db.select().from(products).orderBy(asc(products.name));
+    const rangeSales = await db.select().from(sales).where(saleRange).orderBy(desc(sales.id)).limit(100);
+    const shifts = await db.select().from(registerShifts).orderBy(desc(registerShifts.id)).limit(20);
+    const cashMovements = await db.select().from(cashDrawerMovements).orderBy(desc(cashDrawerMovements.id)).limit(50);
+    const stockMovements = await db.select().from(inventoryMovements).orderBy(desc(inventoryMovements.id)).limit(50);
+    const customerRows = await db.select().from(customers).orderBy(desc(customers.totalSpent)).limit(100);
+    const employeeRows = await db.select().from(employees).orderBy(asc(employees.name)).limit(50);
+    const logs = await db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(40);
+    const rangeReturns = await db.select().from(returns).where(returnRange).orderBy(desc(returns.id)).limit(100);
 
     const rangeIds = rangeSales.map((sale) => sale.id);
     const returnIds = rangeReturns.map((item) => item.id);
-    const [rangeLines, rangePayments, returnedLines] = await Promise.all([
-      rangeIds.length
-        ? db.select().from(saleLines).where(inArray(saleLines.saleId, rangeIds)).orderBy(desc(saleLines.id))
-        : Promise.resolve([]),
-      rangeIds.length
-        ? db.select().from(payments).where(inArray(payments.saleId, rangeIds)).orderBy(desc(payments.id))
-        : Promise.resolve([]),
-      returnIds.length
-        ? db.select().from(returnLines).where(inArray(returnLines.returnId, returnIds)).orderBy(desc(returnLines.id))
-        : Promise.resolve([])
-    ]);
+    const rangeLines = rangeIds.length
+      ? await db.select().from(saleLines).where(inArray(saleLines.saleId, rangeIds)).orderBy(desc(saleLines.id))
+      : [];
+    const rangePayments = rangeIds.length
+      ? await db.select().from(payments).where(inArray(payments.saleId, rangeIds)).orderBy(desc(payments.id))
+      : [];
+    const returnedLines = returnIds.length
+      ? await db
+          .select()
+          .from(returnLines)
+          .where(inArray(returnLines.returnId, returnIds))
+          .orderBy(desc(returnLines.id))
+      : [];
 
     const paymentsBySale = new Map<number, typeof rangePayments>();
     for (const payment of rangePayments) {

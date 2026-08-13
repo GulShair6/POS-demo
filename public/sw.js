@@ -1,4 +1,4 @@
-const CACHE = "atlas-pos-static-v2";
+const CACHE = "atlas-pos-static-v3";
 const STATIC = ["/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -28,13 +28,20 @@ self.addEventListener("fetch", (event) => {
     ["script", "style", "image", "font"].includes(request.destination);
   if (!cacheable) return;
   event.respondWith(
-    caches.match(request).then(
-      (cached) =>
-        cached ||
-        fetch(request).then((response) => {
-          if (response.ok) caches.open(CACHE).then((cache) => cache.put(request, response.clone()));
-          return response;
-        })
-    )
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+      return fetch(request).then((response) => {
+        // Clone immediately — deferring clone until after caches.open() can throw
+        // "Response body is already used" once the browser consumes the body.
+        if (response.ok) {
+          const copy = response.clone();
+          caches
+            .open(CACHE)
+            .then((cache) => cache.put(request, copy))
+            .catch(() => undefined);
+        }
+        return response;
+      });
+    })
   );
 });

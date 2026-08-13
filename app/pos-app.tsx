@@ -250,37 +250,40 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
 
   const load = useCallback(async () => {
     try {
-      // Register catalogue must not depend on the heavy backoffice aggregate (can 504 on Vercel).
-      const [posResponse, boResponse] = await Promise.all([
-        fetch("/api/pos"),
-        fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`)
-      ]);
+      // Fast path: register catalogue + open shift (must stay snappy on Vercel).
+      const posResponse = await fetch("/api/pos");
       const pos = (await posResponse.json()) as {
         products?: Product[];
         shift?: Shift | null;
         error?: string;
       };
-      const data = (await boResponse.json()) as Operations & { error?: string };
-      if (!posResponse.ok && !boResponse.ok) {
-        throw new Error(data.error || pos.error || "Operations data is unavailable");
-      }
+      if (!posResponse.ok) throw new Error(pos.error || "Unable to load register data");
       const posProducts = (pos.products || []).map(withVisual);
-      const boProducts = boResponse.ok ? (data.products || []).map(withVisual) : [];
-      const products = boProducts.length ? boProducts : posProducts;
-      const shifts = boResponse.ok && data.shifts?.length ? data.shifts : pos.shift ? [pos.shift] : [];
-      if (boResponse.ok) {
-        setOps({ ...data, products, shifts });
-      } else {
-        setOps((current) => ({
-          ...current,
-          products,
-          shifts: shifts.length ? shifts : current.shifts
-        }));
-        notify("Reports are slow to load — showing register catalogue");
+      setOps((current) => ({
+        ...current,
+        products: posProducts,
+        shifts: pos.shift
+          ? [pos.shift, ...current.shifts.filter((shift) => shift.id !== pos.shift!.id)]
+          : current.shifts
+      }));
+      setLoading(false);
+
+      // Slow path: reports/backoffice — never block the shop if this times out.
+      try {
+        const boResponse = await fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`);
+        const data = (await boResponse.json()) as Operations & { error?: string };
+        if (!boResponse.ok) throw new Error(data.error || "Operations data is unavailable");
+        const boProducts = (data.products || []).map(withVisual);
+        setOps({
+          ...data,
+          products: boProducts.length ? boProducts : posProducts,
+          shifts: data.shifts?.length ? data.shifts : pos.shift ? [pos.shift] : data.shifts
+        });
+      } catch {
+        /* register already loaded */
       }
     } catch (error) {
       notify(error instanceof Error ? error.message : "Unable to load operations");
-    } finally {
       setLoading(false);
     }
   }, [dates.from, dates.to]);
