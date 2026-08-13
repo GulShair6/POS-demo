@@ -8,6 +8,13 @@
       "when": 1786434563167,
       "tag": "0000_happy_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786617600000,
+      "tag": "0001_login_attempts",
+      "breakpoints": true
     }
   ]
 }

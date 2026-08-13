@@ -68,10 +68,10 @@ External card processing remains manual until a payment provider and terminal mo
    ```bash
    docker compose up -d --build
    docker compose ps
-   curl http://127.0.0.1:3000/api/health
+   curl http://127.0.0.1:3050/api/health
    ```
 
-5. Put an HTTPS reverse proxy in front of `127.0.0.1:3000`. `Caddyfile.example` is a minimal Caddy configuration. After DNS points to the server:
+5. Put an HTTPS reverse proxy in front of `127.0.0.1:3050`. `Caddyfile.example` is a minimal Caddy configuration. After DNS points to the server:
 
    ```bash
    sudo cp Caddyfile.example /etc/caddy/Caddyfile
@@ -81,6 +81,40 @@ External card processing remains manual until a payment provider and terminal mo
 6. Open the HTTPS URL and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 
 Do not expose PostgreSQL publicly. The Compose file intentionally gives the database no host port and binds the application only to loopback.
+
+## Demo deploy (Vercel + Supabase)
+
+For a public demo URL (not the preferred production till setup):
+
+1. Create a free [Supabase](https://supabase.com) project. In **Project Settings → Database**, copy:
+   - **Direct** connection (port `5432`) for migrations
+   - **Transaction pooler** connection (port `6543`) for the app on Vercel
+
+2. From this repo, provision schema + owner + demo catalogue:
+
+   ```bash
+   DIRECT_DATABASE_URL='postgres://postgres:<password>@db.<ref>.supabase.co:5432/postgres' \
+   ADMIN_EMAIL='owner@example.com' \
+   ADMIN_PASSWORD='your-demo-password-12' \
+   SEED_DEMO_DATA=true \
+   ./scripts/provision-remote-db.sh
+   ```
+
+3. Import the GitHub repo into [Vercel](https://vercel.com). Set Node.js to **22.x**. Add environment variables:
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | Supabase **transaction pooler** URL (`:6543`) |
+   | `DB_POOL_SIZE` | `1` |
+   | `DATABASE_PREPARE` | `false` |
+   | `DATABASE_SSL` | `true` |
+   | `SESSION_SECRET` | `openssl rand -base64 48` |
+   | `POS_BUSINESS_NAME` / `POS_STORE_NAME` / `POS_REGISTER_CODE` / `POS_CURRENCY` / `POS_LOCALE` / `POS_TAX_RATE` | same as `.env.example` |
+   | `SEED_DEMO_DATA` | `false` |
+
+4. Deploy. Check `https://<project>.vercel.app/api/health`, then sign in with the seeded owner.
+
+The app auto-detects Supabase pooler URLs and disables prepared statements / query pipelining. Login rate limits are stored in Postgres so they work across serverless instances.
 
 ## Configuration
 

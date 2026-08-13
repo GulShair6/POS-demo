@@ -15,6 +15,8 @@ import { authorize } from "../../../lib/auth";
 import { getPublicConfig } from "../../../lib/config";
 import { calculateSaleTotals, resolveSplitTender, roundMoney } from "../../../lib/finance";
 
+export const maxDuration = 30;
+
 type SalePayload = {
   items?: Array<{ id: number; quantity: number }>;
   method?: string;

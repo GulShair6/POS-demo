@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { employees } from "../../../../db/schema";
+import { employees, loginAttempts } from "../../../../db/schema";
 import { createSessionToken, SESSION_COOKIE } from "../../../../lib/auth";
 import { verifyPassword } from "../../../../lib/password";
 
-const attempts = new Map<string, { count: number; resetAt: number }>();
+const WINDOW_MS = 15 * 60 * 1000;
+const MAX_ATTEMPTS = 8;
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -15,12 +16,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request origin" }, { status: 403 });
   }
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  const now = Date.now();
-  const state = attempts.get(ip);
-  if (state && state.resetAt > now && state.count >= 8)
-    return Response.json({ error: "Too many sign-in attempts. Try again later." }, { status: 429 });
-  const payload = (await request.json().catch(() => ({}))) as { email?: string; password?: string };
   const db = await getDb();
+  const now = Date.now();
+  const existing = (await db.select().from(loginAttempts).where(eq(loginAttempts.ip, ip)).limit(1))[0];
+  const resetAtMs = existing ? new Date(existing.resetAt).getTime() : 0;
+  if (existing && resetAtMs > now && existing.count >= MAX_ATTEMPTS) {
+    return Response.json({ error: "Too many sign-in attempts. Try again later." }, { status: 429 });
+  }
+  const payload = (await request.json().catch(() => ({}))) as { email?: string; password?: string };
   const employee = (
     await db
       .select()
@@ -29,10 +32,21 @@ export async function POST(request: Request) {
       .limit(1)
   )[0];
   if (!employee || !employee.active || !payload.password || !verifyPassword(payload.password, employee.passwordHash)) {
-    attempts.set(ip, { count: state && state.resetAt > now ? state.count + 1 : 1, resetAt: now + 15 * 60 * 1000 });
+    const nextReset = new Date(now + WINDOW_MS).toISOString();
+    if (!existing || resetAtMs <= now) {
+      await db
+        .insert(loginAttempts)
+        .values({ ip, count: 1, resetAt: nextReset })
+        .onConflictDoUpdate({ target: loginAttempts.ip, set: { count: 1, resetAt: nextReset } });
+    } else {
+      await db
+        .update(loginAttempts)
+        .set({ count: sql`${loginAttempts.count} + 1` })
+        .where(eq(loginAttempts.ip, ip));
+    }
     return Response.json({ error: "Invalid email or password" }, { status: 401 });
   }
-  attempts.delete(ip);
+  if (existing) await db.delete(loginAttempts).where(eq(loginAttempts.ip, ip));
   const token = createSessionToken({
     id: employee.id,
     name: employee.name,

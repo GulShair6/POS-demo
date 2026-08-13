@@ -151,6 +151,8 @@ function returnDateRange(from: string | null, to: string | null) {
   return conditions.length ? and(...conditions) : undefined;
 }
 
+export const maxDuration = 30;
+
 export async function GET(request: Request) {
   try {
     const auth = await authorize(request, "pos.use");

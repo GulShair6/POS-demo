@@ -207,3 +207,10 @@ export const appSettings = pgTable("app_settings", {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`)
 });
+
+/** Shared across serverless instances (Vercel); replaces in-memory login throttling. */
+export const loginAttempts = pgTable("login_attempts", {
+  ip: text("ip").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: time("reset_at").notNull()
+});
