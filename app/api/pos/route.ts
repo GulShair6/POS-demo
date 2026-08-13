@@ -3,6 +3,9 @@ import { getDb } from "../../../db";
 import { authorize } from "../../../lib/auth";
 import { products, registerShifts, sales } from "../../../db/schema";
 
+export const preferredRegion = "hnd1";
+export const maxDuration = 15;
+
 const seedProducts = [
   ["Cappuccino", "COF-002", "Coffee", 4.5, 38],
   ["Butter Croissant", "BAK-014", "Bakery", 3.25, 12],

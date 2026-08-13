@@ -250,10 +250,34 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`);
-      const data = (await response.json()) as Operations & { error?: string };
-      if (!response.ok) throw new Error(data.error || "Operations data is unavailable");
-      setOps({ ...data, products: data.products.map(withVisual) });
+      // Register catalogue must not depend on the heavy backoffice aggregate (can 504 on Vercel).
+      const [posResponse, boResponse] = await Promise.all([
+        fetch("/api/pos"),
+        fetch(`/api/backoffice?from=${dates.from}&to=${dates.to}`)
+      ]);
+      const pos = (await posResponse.json()) as {
+        products?: Product[];
+        shift?: Shift | null;
+        error?: string;
+      };
+      const data = (await boResponse.json()) as Operations & { error?: string };
+      if (!posResponse.ok && !boResponse.ok) {
+        throw new Error(data.error || pos.error || "Operations data is unavailable");
+      }
+      const posProducts = (pos.products || []).map(withVisual);
+      const boProducts = boResponse.ok ? (data.products || []).map(withVisual) : [];
+      const products = boProducts.length ? boProducts : posProducts;
+      const shifts = boResponse.ok && data.shifts?.length ? data.shifts : pos.shift ? [pos.shift] : [];
+      if (boResponse.ok) {
+        setOps({ ...data, products, shifts });
+      } else {
+        setOps((current) => ({
+          ...current,
+          products,
+          shifts: shifts.length ? shifts : current.shifts
+        }));
+        notify("Reports are slow to load — showing register catalogue");
+      }
     } catch (error) {
       notify(error instanceof Error ? error.message : "Unable to load operations");
     } finally {

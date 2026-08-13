@@ -151,7 +151,8 @@ function returnDateRange(from: string | null, to: string | null) {
   return conditions.length ? and(...conditions) : undefined;
 }
 
-export const maxDuration = 30;
+export const maxDuration = 60;
+export const preferredRegion = "hnd1";
 
 export async function GET(request: Request) {
   try {

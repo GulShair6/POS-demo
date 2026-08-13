@@ -4,6 +4,9 @@ import { auditLogs, cashDrawerMovements, registerShifts } from "../../../db/sche
 import { authorize } from "../../../lib/auth";
 import { getPublicConfig } from "../../../lib/config";
 
+export const preferredRegion = "hnd1";
+export const maxDuration = 15;
+
 export async function GET(request: Request) {
   try {
     const auth = await authorize(request, "pos.use");
