@@ -1,6 +1,7 @@
-import { asc, desc } from "drizzle-orm";
+import { and, asc, desc, gte, inArray, lte } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { authorize, hasPermission } from "../../../lib/auth";
+import { expandRefundTenders, resolveReportDateBounds, roundMoney } from "../../../lib/finance";
 import {
   auditLogs,
   cashDrawerMovements,
@@ -136,6 +137,20 @@ const starterProducts = [
   }
 ];
 
+function saleDateRange(from: string | null, to: string | null) {
+  const conditions = [];
+  if (from) conditions.push(gte(sales.createdAt, from));
+  if (to) conditions.push(lte(sales.createdAt, `${to}T23:59:59.999Z`));
+  return conditions.length ? and(...conditions) : undefined;
+}
+
+function returnDateRange(from: string | null, to: string | null) {
+  const conditions = [];
+  if (from) conditions.push(gte(returns.createdAt, from));
+  if (to) conditions.push(lte(returns.createdAt, `${to}T23:59:59.999Z`));
+  return conditions.length ? and(...conditions) : undefined;
+}
+
 export async function GET(request: Request) {
   try {
     const auth = await authorize(request, "pos.use");
@@ -149,71 +164,96 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const from = url.searchParams.get("from");
-    const to = url.searchParams.get("to");
+    const bounds = resolveReportDateBounds(url.searchParams.get("from"), url.searchParams.get("to"));
+    const from = bounds.from;
+    const to = bounds.to;
+    const saleRange = saleDateRange(from, to);
+    const returnRange = returnDateRange(from, to);
     const [
       catalogue,
-      allSales,
-      allLines,
-      allPayments,
+      rangeSales,
       shifts,
       cashMovements,
       stockMovements,
       customerRows,
       employeeRows,
       logs,
-      returnRows,
-      returnedLines
+      rangeReturns
     ] = await Promise.all([
       db.select().from(products).orderBy(asc(products.name)),
-      db.select().from(sales).orderBy(desc(sales.id)).limit(250),
-      db.select().from(saleLines).orderBy(desc(saleLines.id)).limit(1000),
-      db.select().from(payments).orderBy(desc(payments.id)).limit(500),
+      db.select().from(sales).where(saleRange).orderBy(desc(sales.id)),
       db.select().from(registerShifts).orderBy(desc(registerShifts.id)).limit(50),
       db.select().from(cashDrawerMovements).orderBy(desc(cashDrawerMovements.id)).limit(250),
       db.select().from(inventoryMovements).orderBy(desc(inventoryMovements.id)).limit(500),
       db.select().from(customers).orderBy(desc(customers.totalSpent)),
       db.select().from(employees).orderBy(asc(employees.name)),
       db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(150),
-      db.select().from(returns).orderBy(desc(returns.id)).limit(150),
-      db.select().from(returnLines).orderBy(desc(returnLines.id)).limit(500)
+      db.select().from(returns).where(returnRange).orderBy(desc(returns.id))
     ]);
 
-    const inRange = (createdAt: string) => (!from || createdAt >= from) && (!to || createdAt <= `${to}T23:59:59.999Z`);
-    const rangeSales = allSales.filter((sale) => inRange(sale.createdAt));
-    const rangeIds = new Set(rangeSales.map((sale) => sale.id));
-    const rangePayments = allPayments.filter((payment) => rangeIds.has(payment.saleId));
-    const rangeReturns = returnRows.filter((item) => inRange(item.createdAt));
-    const netSales = rangeSales.reduce((sum, sale) => sum + sale.total - sale.refundedAmount, 0);
-    const refunds = rangeReturns.reduce((sum, item) => sum + item.amount, 0);
-    const tax =
-      rangeSales.reduce((sum, sale) => sum + sale.tax, 0) - rangeReturns.reduce((sum, item) => sum + item.tax, 0);
+    const rangeIds = rangeSales.map((sale) => sale.id);
+    const returnIds = rangeReturns.map((item) => item.id);
+    const [rangeLines, rangePayments, returnedLines] = await Promise.all([
+      rangeIds.length
+        ? db.select().from(saleLines).where(inArray(saleLines.saleId, rangeIds)).orderBy(desc(saleLines.id))
+        : Promise.resolve([]),
+      rangeIds.length
+        ? db.select().from(payments).where(inArray(payments.saleId, rangeIds)).orderBy(desc(payments.id))
+        : Promise.resolve([]),
+      returnIds.length
+        ? db.select().from(returnLines).where(inArray(returnLines.returnId, returnIds)).orderBy(desc(returnLines.id))
+        : Promise.resolve([])
+    ]);
+
+    const paymentsBySale = new Map<number, typeof rangePayments>();
+    for (const payment of rangePayments) {
+      const list = paymentsBySale.get(payment.saleId) ?? [];
+      list.push(payment);
+      paymentsBySale.set(payment.saleId, list);
+    }
+
+    const netSales = roundMoney(rangeSales.reduce((sum, sale) => sum + sale.total - sale.refundedAmount, 0));
+    const refunds = roundMoney(rangeReturns.reduce((sum, item) => sum + item.amount, 0));
+    const tax = roundMoney(
+      rangeSales.reduce((sum, sale) => sum + sale.tax, 0) - rangeReturns.reduce((sum, item) => sum + item.tax, 0)
+    );
     const tender = rangePayments.reduce<Record<string, number>>((result, payment) => {
-      result[payment.method] = (result[payment.method] ?? 0) + payment.amount;
+      result[payment.method] = roundMoney((result[payment.method] ?? 0) + payment.amount);
       return result;
     }, {});
-    const productSales = allLines
-      .filter((line) => rangeIds.has(line.saleId))
-      .reduce<Record<number, { quantity: number; revenue: number }>>((result, line) => {
-        const current = result[line.productId] ?? { quantity: 0, revenue: 0 };
-        current.quantity += line.quantity - line.returnedQuantity;
-        current.revenue += line.lineTotal * ((line.quantity - line.returnedQuantity) / line.quantity);
-        result[line.productId] = current;
-        return result;
-      }, {});
-    const cogs = allLines
-      .filter((line) => rangeIds.has(line.saleId))
-      .reduce((sum, line) => sum + line.unitCost * (line.quantity - line.returnedQuantity), 0);
+    for (const item of rangeReturns) {
+      const salePayments = paymentsBySale.get(item.saleId) ?? [];
+      const legs = expandRefundTenders([{ method: item.method, amount: item.amount }], salePayments);
+      for (const leg of legs) {
+        tender[leg.method] = roundMoney((tender[leg.method] ?? 0) - leg.amount);
+      }
+    }
+    for (const [method, value] of Object.entries(tender)) {
+      if (Math.abs(value) < 0.005) delete tender[method];
+      else tender[method] = roundMoney(value);
+    }
+    const productSales = rangeLines.reduce<Record<number, { quantity: number; revenue: number }>>((result, line) => {
+      const current = result[line.productId] ?? { quantity: 0, revenue: 0 };
+      current.quantity += line.quantity - line.returnedQuantity;
+      current.revenue = roundMoney(
+        current.revenue + line.lineTotal * ((line.quantity - line.returnedQuantity) / line.quantity)
+      );
+      result[line.productId] = current;
+      return result;
+    }, {});
+    const cogs = roundMoney(
+      rangeLines.reduce((sum, line) => sum + line.unitCost * (line.quantity - line.returnedQuantity), 0)
+    );
     const canSeeCost = hasPermission(auth.user, "reports.read") || hasPermission(auth.user, "inventory.adjust");
     const canManageEmployees = hasPermission(auth.user, "employees.manage");
     const canReadAudit = hasPermission(auth.user, "audit.read");
 
     return Response.json({
       products: catalogue.map((product) => (canSeeCost ? product : { ...product, cost: 0 })),
-      sales: allSales.map((sale) => ({
+      sales: rangeSales.map((sale) => ({
         ...sale,
-        lines: allLines.filter((line) => line.saleId === sale.id),
-        payments: allPayments.filter((payment) => payment.saleId === sale.id)
+        lines: rangeLines.filter((line) => line.saleId === sale.id),
+        payments: rangePayments.filter((payment) => payment.saleId === sale.id)
       })),
       shifts,
       cashMovements,
@@ -230,22 +270,23 @@ export async function GET(request: Request) {
           createdAt: employee.createdAt
         })),
       auditLogs: canReadAudit ? logs : [],
-      returns: returnRows.map((item) => ({
+      returns: rangeReturns.map((item) => ({
         ...item,
         lines: returnedLines.filter((line) => line.returnId === item.id)
       })),
       summary: {
-        netSales: Number(netSales.toFixed(2)),
-        grossSales: Number(rangeSales.reduce((sum, sale) => sum + sale.total, 0).toFixed(2)),
-        refunds: Number(refunds.toFixed(2)),
-        tax: Number(tax.toFixed(2)),
+        netSales,
+        grossSales: roundMoney(rangeSales.reduce((sum, sale) => sum + sale.total, 0)),
+        refunds,
+        tax,
         transactions: rangeSales.length,
-        averageOrder: rangeSales.length ? Number((netSales / rangeSales.length).toFixed(2)) : 0,
-        cogs: canSeeCost ? Number(cogs.toFixed(2)) : 0,
-        grossProfit: canSeeCost ? Number((netSales - tax - cogs).toFixed(2)) : 0,
+        averageOrder: rangeSales.length ? roundMoney(netSales / rangeSales.length) : 0,
+        cogs: canSeeCost ? cogs : 0,
+        grossProfit: canSeeCost ? roundMoney(netSales - tax - cogs) : 0,
         tender,
         productSales
-      }
+      },
+      dateBounds: bounds
     });
   } catch (error) {
     return Response.json(

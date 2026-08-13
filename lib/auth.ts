@@ -4,48 +4,11 @@ import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { employees } from "../db/schema";
+import { hasPermission, type Permission } from "./permissions";
 
+export type { Permission } from "./permissions";
+export { hasPermission } from "./permissions";
 export type SessionUser = { id: number; name: string; email: string; role: string; exp: number };
-export type Permission =
-  | "pos.use"
-  | "sales.read"
-  | "refund.create"
-  | "catalogue.manage"
-  | "inventory.adjust"
-  | "customers.manage"
-  | "reports.read"
-  | "employees.manage"
-  | "audit.read";
-
-const permissions: Record<string, Permission[]> = {
-  Owner: [
-    "pos.use",
-    "sales.read",
-    "refund.create",
-    "catalogue.manage",
-    "inventory.adjust",
-    "customers.manage",
-    "reports.read",
-    "employees.manage",
-    "audit.read"
-  ],
-  Manager: [
-    "pos.use",
-    "sales.read",
-    "refund.create",
-    "catalogue.manage",
-    "inventory.adjust",
-    "customers.manage",
-    "reports.read",
-    "employees.manage",
-    "audit.read"
-  ],
-  Supervisor: ["pos.use", "sales.read", "refund.create", "inventory.adjust", "customers.manage", "reports.read"],
-  Cashier: ["pos.use", "sales.read", "customers.manage"],
-  Inventory: ["pos.use", "catalogue.manage", "inventory.adjust", "reports.read"],
-  Accountant: ["pos.use", "sales.read", "reports.read", "audit.read"],
-  Auditor: ["pos.use", "sales.read", "reports.read", "audit.read"]
-};
 
 export const SESSION_COOKIE = "atlas_session";
 
@@ -88,10 +51,6 @@ export async function getCurrentUser() {
   return employee?.active
     ? { id: employee.id, name: employee.name, email: employee.email, role: employee.role, exp: session.exp }
     : null;
-}
-
-export function hasPermission(user: SessionUser, permission: Permission) {
-  return permissions[user.role]?.includes(permission) ?? false;
 }
 
 function requestToken(request: Request) {

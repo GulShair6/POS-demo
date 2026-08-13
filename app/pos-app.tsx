@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { roundMoney } from "../lib/finance";
+import { hasPermission } from "../lib/permissions";
 
 type Product = {
   id: number;
@@ -40,6 +42,7 @@ type Sale = {
   createdAt: string;
   lines: SaleLine[];
   payments: Payment[];
+  changeDue?: number;
 };
 type Shift = {
   id: number;
@@ -286,11 +289,16 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
     }
     localStorage.setItem("atlas-offline-sales", JSON.stringify(remaining));
     setQueuedSales(remaining.filter((item) => item.employeeId === currentUser.id).length);
-    if (remaining.length < queued.length) {
+    const mineQueued = queued.filter((item) => item.employeeId === currentUser.id).length;
+    const mineLeft = remaining.filter((item) => item.employeeId === currentUser.id).length;
+    const synced = mineQueued - mineLeft;
+    if (synced > 0) {
       notify(
-        `${queued.length - remaining.length} offline sale${queued.length - remaining.length === 1 ? "" : "s"} synchronized`
+        `${synced} offline sale${synced === 1 ? "" : "s"} synchronized${mineLeft ? ` · ${mineLeft} still pending` : ""}`
       );
       await load();
+    } else if (mineLeft > 0) {
+      notify(`${mineLeft} offline sale${mineLeft === 1 ? "" : "s"} failed to sync — still queued`);
     }
   }, [load, currentUser.id]);
   useEffect(() => {
@@ -411,8 +419,12 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
   }
   async function openShift() {
     if (!online) return notify("A shift must be opened while online");
+    const input = window.prompt("Opening float amount", "200");
+    if (input === null) return;
+    const openingFloat = Number(input);
+    if (!Number.isFinite(openingFloat) || openingFloat < 0) return notify("Enter a valid opening float");
     try {
-      await request("/api/shifts", { action: "open", openingFloat: 200 });
+      await request("/api/shifts", { action: "open", openingFloat });
       await load();
       notify("Register shift opened");
     } catch (error) {
@@ -450,6 +462,8 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
     URL.revokeObjectURL(link.href);
     notify("Sales export downloaded");
   }
+
+  const canRefund = hasPermission(currentUser, "refund.create");
 
   return (
     <main className="app-shell">
@@ -559,7 +573,11 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
               setRefundSale,
               notify,
               request,
-              load
+              load,
+              canRefund,
+              config,
+              online,
+              queuedSales
             }}
           />
         )}
@@ -593,13 +611,14 @@ export default function PosApp({ currentUser, config }: { currentUser: CurrentUs
         <SaleModal
           sale={selectedSale}
           close={() => setSelectedSale(null)}
+          canRefund={canRefund}
           refund={() => {
             setRefundSale(selectedSale);
             setSelectedSale(null);
           }}
         />
       )}
-      {refundSale && (
+      {refundSale && canRefund && (
         <RefundModal
           sale={refundSale}
           close={() => setRefundSale(null)}
@@ -644,6 +663,17 @@ function RegisterView(p: {
   online: boolean;
   queuedSales: number;
 }) {
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "F2") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   return (
     <div className="register-layout">
       <div className="catalogue-panel">
@@ -660,7 +690,7 @@ function RegisterView(p: {
             </small>
           </div>
           <div className="top-actions">
-            <button onClick={() => p.notify("Barcode scanner ready")}>
+            <button type="button" onClick={() => searchRef.current?.focus()} title="Focus product search (F2)">
               ⌗ <span>Scan</span>
             </button>
             <button onClick={p.drawerNoSale}>
@@ -680,13 +710,11 @@ function RegisterView(p: {
               <p>New sale</p>
               <h1>What are we selling?</h1>
             </div>
-            <button className="hold-button" onClick={() => p.notify("Sale held on this register")}>
-              Ⅱ Hold sale
-            </button>
           </div>
           <label className="search-box">
             <span>⌕</span>
             <input
+              ref={searchRef}
               value={p.search}
               onChange={(e) => p.setSearch(e.target.value)}
               placeholder="Search products, SKU, or scan barcode..."
@@ -727,7 +755,6 @@ function RegisterView(p: {
             <h2>Current order</h2>
             <p>{p.cart.reduce((n, l) => n + l.quantity, 0)} items</p>
           </div>
-          <button className="more-button">•••</button>
         </div>
         <label className="customer-select">
           <span>♙</span>
@@ -773,9 +800,6 @@ function RegisterView(p: {
           ))}
         </div>
         <div className="cart-summary">
-          <button className="discount-button" onClick={() => p.notify("Discounts require supervisor approval")}>
-            ＋ Add discount or promo code
-          </button>
           <dl>
             <div>
               <dt>Subtotal</dt>
@@ -802,7 +826,6 @@ function RegisterView(p: {
           </button>
           <div className="cart-actions">
             <button onClick={() => p.setCart([])}>⌫ Clear</button>
-            <button onClick={() => p.notify("Order note added")}>▤ Add note</button>
             {p.activeShift ? (
               <>
                 <button onClick={() => p.setModal("cash")}>Cash in/out</button>
@@ -832,6 +855,10 @@ function BackOffice(p: {
   notify: (v: string) => void;
   request: RequestFn;
   load: () => Promise<void>;
+  canRefund: boolean;
+  config: PublicConfig;
+  online: boolean;
+  queuedSales: number;
 }) {
   const { ops } = p;
   const title = p.view[0].toUpperCase() + p.view.slice(1);
@@ -867,9 +894,14 @@ function BackOffice(p: {
   return (
     <div className="backoffice">
       {header}
-      {p.view === "dashboard" && <Dashboard ops={ops} setView={p.setView} />}{" "}
+      {p.view === "dashboard" && <Dashboard ops={ops} setView={p.setView} canRefund={p.canRefund} />}{" "}
       {p.view === "transactions" && (
-        <Transactions sales={ops.sales} setSelected={p.setSelectedSale} refund={p.setRefundSale} />
+        <Transactions
+          sales={ops.sales}
+          setSelected={p.setSelectedSale}
+          refund={p.setRefundSale}
+          canRefund={p.canRefund}
+        />
       )}{" "}
       {p.view === "products" && (
         <Products
@@ -892,6 +924,9 @@ function BackOffice(p: {
           request={p.request}
           reload={p.load}
           notify={p.notify}
+          config={p.config}
+          online={p.online}
+          queuedSales={p.queuedSales}
         />
       )}{" "}
       {p.view !== "dashboard" && (
@@ -905,7 +940,7 @@ function BackOffice(p: {
   );
 }
 
-function Dashboard({ ops, setView }: { ops: Operations; setView: (v: string) => void }) {
+function Dashboard({ ops, setView, canRefund }: { ops: Operations; setView: (v: string) => void; canRefund: boolean }) {
   const top = Object.entries(ops.summary.productSales)
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .slice(0, 6);
@@ -961,6 +996,7 @@ function Dashboard({ ops, setView }: { ops: Operations; setView: (v: string) => 
       <Transactions
         sales={ops.sales.slice(0, 6)}
         compact
+        canRefund={canRefund}
         setSelected={() => setView("transactions")}
         refund={() => setView("transactions")}
       />
@@ -1013,11 +1049,13 @@ function Transactions({
   sales,
   setSelected,
   refund,
+  canRefund,
   compact = false
 }: {
   sales: Sale[];
   setSelected: (v: Sale) => void;
   refund: (v: Sale) => void;
+  canRefund: boolean;
   compact?: boolean;
 }) {
   return (
@@ -1060,7 +1098,7 @@ function Transactions({
                   <button className="table-action" onClick={() => setSelected(sale)}>
                     Details
                   </button>
-                  {sale.status !== "refunded" && !compact && (
+                  {canRefund && sale.status !== "refunded" && !compact && (
                     <button className="table-action danger-link" onClick={() => refund(sale)}>
                       Refund
                     </button>
@@ -1361,13 +1399,19 @@ function Settings({
   addEmployee,
   request,
   reload,
-  notify
+  notify,
+  config,
+  online,
+  queuedSales
 }: {
   ops: Operations;
   addEmployee: () => void;
   request: RequestFn;
   reload: () => Promise<void>;
   notify: (v: string) => void;
+  config: PublicConfig;
+  online: boolean;
+  queuedSales: number;
 }) {
   async function toggle(employee: Employee) {
     try {
@@ -1424,12 +1468,18 @@ function Settings({
       <div className="settings-grid">
         <article className="operations-card">
           <p className="eyebrow">Hardware & connectivity</p>
-          <h2>Register 02</h2>
-          <Status label="Barcode scanner" state="Ready" />
-          <Status label="Thermal printer" state="Configured" />
-          <Status label="Cash drawer" state="Printer-triggered" />
-          <Status label="Card terminal" state="Manual mode" />
-          <Status label="Offline queue" state="Online-only" warning />
+          <h2>{config.registerCode}</h2>
+          <Status label="Receipt printing" state="Browser print" />
+          <Status label="Card payments" state="Manual entry" />
+          <Status label="Cash drawer" state="Logged in software" />
+          <Status label="Barcode input" state="Keyboard wedge / search" />
+          <Status
+            label="Offline cash queue"
+            state={
+              !online ? "Offline — queueing cash" : queuedSales ? `${queuedSales} awaiting sync` : "Ready (cash only)"
+            }
+            warning={!online || queuedSales > 0}
+          />
         </article>
         <article className="operations-card audit-card">
           <p className="eyebrow">Immutable activity history</p>
@@ -1605,7 +1655,14 @@ function ReceiptModal({
             </span>
             {data.method === "Cash" && (
               <span>
-                Change <strong>{money(Math.max(0, data.tendered - data.sale.total))}</strong>
+                Change{" "}
+                <strong>
+                  {money(
+                    Number.isFinite(data.sale.changeDue)
+                      ? Number(data.sale.changeDue)
+                      : roundMoney(Math.max(0, data.tendered - data.sale.total))
+                  )}
+                </strong>
               </span>
             )}
           </div>
@@ -1799,7 +1856,17 @@ function Field({
   );
 }
 
-function SaleModal({ sale, close, refund }: { sale: Sale; close: () => void; refund: () => void }) {
+function SaleModal({
+  sale,
+  close,
+  refund,
+  canRefund
+}: {
+  sale: Sale;
+  close: () => void;
+  refund: () => void;
+  canRefund: boolean;
+}) {
   return (
     <div className="modal-backdrop">
       <section className="form-modal sale-detail">
@@ -1843,7 +1910,7 @@ function SaleModal({ sale, close, refund }: { sale: Sale; close: () => void; ref
         </div>
         <div className="modal-footer">
           <button onClick={() => window.print()}>Print receipt</button>
-          {sale.status !== "refunded" && (
+          {canRefund && sale.status !== "refunded" && (
             <button className="danger-button" onClick={refund}>
               Process refund
             </button>
@@ -1931,9 +1998,10 @@ function RefundModal({
         ))}
         <label>
           Refund method
-          <select name="method">
-            <option>Card</option>
-            <option>Cash</option>
+          <select name="method" defaultValue="">
+            <option value="">Original tender (proportional if split)</option>
+            <option value="Card">Card</option>
+            <option value="Cash">Cash</option>
           </select>
         </label>
         <label>

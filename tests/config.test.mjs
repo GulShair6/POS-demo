@@ -20,5 +20,5 @@ test("compose keeps PostgreSQL private and binds the app to loopback", async () 
   ).readFile(new URL("../docker-compose.yml", import.meta.url), "utf8");
   const databaseService = text.split("\n  app:")[0];
   assert.doesNotMatch(databaseService, /\n\s+ports:/);
-  assert.match(text, /127\.0\.0\.1:3000:3000/);
+  assert.match(text, /127\.0\.0\.1:3050:3000/);
 });

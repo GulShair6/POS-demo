@@ -13,7 +13,7 @@ import {
 } from "../../../db/schema";
 import { authorize } from "../../../lib/auth";
 import { getPublicConfig } from "../../../lib/config";
-import { calculateSaleTotals, resolveSplitTender } from "../../../lib/finance";
+import { calculateSaleTotals, resolveSplitTender, roundMoney } from "../../../lib/finance";
 
 type SalePayload = {
   items?: Array<{ id: number; quantity: number }>;
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
           unitPrice: product.price,
           unitCost: product.cost,
           quantity,
-          lineTotal: Number((product.price * quantity).toFixed(2))
+          lineTotal: roundMoney(product.price * quantity)
         }))
       );
       await tx.insert(inventoryMovements).values(
@@ -116,6 +116,7 @@ export async function POST(request: Request) {
       }
       const method = ["Cash", "Card", "Split"].includes(payload.method || "") ? payload.method! : "Cash";
       const tendered = method === "Cash" ? Math.max(total, Number(payload.tendered) || total) : total;
+      const changeDue = roundMoney(Math.max(0, tendered - total));
       let cashAmount = 0;
       if (method === "Split") {
         const split = resolveSplitTender(total, payload.splitCash, payload.splitCard);
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
           method,
           amount: total,
           tendered,
-          changeDue: Number(Math.max(0, tendered - total).toFixed(2))
+          changeDue
         });
       }
       if (cashAmount) {
@@ -174,7 +175,7 @@ export async function POST(request: Request) {
           total,
           method,
           tendered,
-          changeDue: Math.max(0, tendered - total)
+          changeDue
         },
         duplicate: false
       };

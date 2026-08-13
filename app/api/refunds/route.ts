@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import {
   auditLogs,
   cashDrawerMovements,
+  customers,
   inventoryMovements,
   payments,
   products,
@@ -13,7 +14,12 @@ import {
   sales
 } from "../../../db/schema";
 import { authorize } from "../../../lib/auth";
-import { calculateRefundLine } from "../../../lib/finance";
+import {
+  allocateRefundTender,
+  calculateRefundLine,
+  loyaltyAdjustmentForRefund,
+  roundMoney
+} from "../../../lib/finance";
 
 export async function POST(request: Request) {
   try {
@@ -31,7 +37,8 @@ export async function POST(request: Request) {
     const result = await db.transaction(async (tx) => {
       const sale = (await tx.select().from(sales).where(eq(sales.id, payload.saleId!)).limit(1).for("update"))[0];
       if (!sale || sale.status === "refunded") throw new Error("NOT_ELIGIBLE");
-      const originalPayment = (await tx.select().from(payments).where(eq(payments.saleId, sale.id)).limit(1))[0];
+      const originalPayments = await tx.select().from(payments).where(eq(payments.saleId, sale.id));
+      const priorReturns = await tx.select().from(returns).where(eq(returns.saleId, sale.id));
       const selected: Array<{
         line: typeof saleLines.$inferSelect;
         quantity: number;
@@ -57,14 +64,20 @@ export async function POST(request: Request) {
         const amounts = calculateRefundLine(line.unitPrice, quantity, sale.subtotal, sale.tax);
         selected.push({ line, quantity, restock: requested.restock !== false, ...amounts });
       }
-      const tax = Number(selected.reduce((sum, item) => sum + item.tax, 0).toFixed(2));
-      const amount = Number(selected.reduce((sum, item) => sum + item.amount, 0).toFixed(2));
+      const tax = roundMoney(selected.reduce((sum, item) => sum + item.tax, 0));
+      const amount = roundMoney(selected.reduce((sum, item) => sum + item.amount, 0));
       if (sale.refundedAmount + amount > sale.total + 0.01) throw new Error("EXCEEDS_PAYMENT");
-      const method = ["Cash", "Card"].includes(payload.method || "")
-        ? payload.method!
-        : originalPayment?.method === "Cash"
-          ? "Cash"
-          : "Card";
+      const requestedMethod = ["Cash", "Card"].includes(payload.method || "") ? payload.method : undefined;
+      const allocations = allocateRefundTender(
+        amount,
+        originalPayments.map((payment) => ({ method: payment.method, amount: payment.amount })),
+        priorReturns.map((item) => ({ method: item.method, amount: item.amount })),
+        requestedMethod
+      );
+      const method = allocations.length === 1 ? allocations[0].method : "Split";
+      const cashRefund = roundMoney(
+        allocations.filter((item) => item.method === "Cash").reduce((sum, item) => sum + item.amount, 0)
+      );
       const receiptNumber = `RT-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const [returnRecord] = await tx
         .insert(returns)
@@ -107,10 +120,31 @@ export async function POST(request: Request) {
           });
         }
       }
-      const refundedAmount = Number((sale.refundedAmount + amount).toFixed(2));
+      const refundedAmount = roundMoney(sale.refundedAmount + amount);
       const status = refundedAmount >= sale.total - 0.01 ? "refunded" : "partially_refunded";
       await tx.update(sales).set({ refundedAmount, status }).where(eq(sales.id, sale.id));
-      if (method === "Cash" && sale.shiftId) {
+      if (sale.customerId) {
+        const customer = (
+          await tx.select().from(customers).where(eq(customers.id, sale.customerId)).limit(1).for("update")
+        )[0];
+        if (customer) {
+          const adjustment = loyaltyAdjustmentForRefund({
+            refundAmount: amount,
+            saleTotal: sale.total,
+            saleAlreadyRefunded: sale.refundedAmount,
+            saleFullyRefundedAfter: status === "refunded"
+          });
+          await tx
+            .update(customers)
+            .set({
+              visits: sql`GREATEST(0, ${customers.visits} - ${adjustment.visitsDelta})`,
+              totalSpent: sql`GREATEST(0, ${customers.totalSpent} - ${adjustment.totalSpentDelta})`,
+              loyaltyPoints: sql`GREATEST(0, ${customers.loyaltyPoints} - ${adjustment.loyaltyPointsDelta})`
+            })
+            .where(eq(customers.id, customer.id));
+        }
+      }
+      if (cashRefund > 0 && sale.shiftId) {
         const active = (
           await tx
             .select()
@@ -119,16 +153,16 @@ export async function POST(request: Request) {
             .limit(1)
             .for("update")
         )[0];
-        if (!active || active.expectedCash < amount) throw new Error("DRAWER_CLOSED");
+        if (!active || active.expectedCash < cashRefund) throw new Error("DRAWER_CLOSED");
         await tx
           .update(registerShifts)
-          .set({ expectedCash: sql`${registerShifts.expectedCash} - ${amount}` })
+          .set({ expectedCash: sql`${registerShifts.expectedCash} - ${cashRefund}` })
           .where(eq(registerShifts.id, active.id));
         await tx.insert(cashDrawerMovements).values({
           shiftId: active.id,
           saleId: sale.id,
           type: "cash_refund",
-          amount: -amount,
+          amount: -cashRefund,
           reason: receiptNumber,
           employeeName: auth.user.name
         });
@@ -138,7 +172,7 @@ export async function POST(request: Request) {
         action: "sale.refunded",
         entityType: "sale",
         entityId: String(sale.id),
-        details: `${receiptNumber} · ${amount.toFixed(2)} · ${payload.reason!.trim()}`
+        details: `${receiptNumber} · ${amount.toFixed(2)} · ${method} · ${payload.reason!.trim()}`
       });
       return { return: returnRecord, sale: { ...sale, refundedAmount, status } };
     });
@@ -150,7 +184,9 @@ export async function POST(request: Request) {
       QUANTITY: ["A refund quantity exceeds the available purchased quantity", 409],
       DUPLICATE_LINE: ["A sale line was submitted more than once", 400],
       EXCEEDS_PAYMENT: ["Refund exceeds the amount paid", 409],
-      DRAWER_CLOSED: ["Cash refunds require the original shift to be open with sufficient expected cash", 409]
+      DRAWER_CLOSED: ["Cash refunds require the original shift to be open with sufficient expected cash", 409],
+      TENDER: ["Refund tender exceeds the remaining amount for that payment method", 409],
+      "No original tender": ["Sale has no recorded tender to refund against", 409]
     };
     const mapped = known[code];
     return Response.json({ error: mapped?.[0] || code || "Refund failed" }, { status: mapped?.[1] || 500 });

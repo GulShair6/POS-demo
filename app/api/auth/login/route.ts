@@ -42,9 +42,11 @@ export async function POST(request: Request) {
   const response = Response.json({
     user: { id: employee.id, name: employee.name, email: employee.email, role: employee.role }
   });
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const secure = forwardedProto === "https" || (!forwardedProto && new URL(request.url).protocol === "https:");
   response.headers.append(
     "set-cookie",
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${process.env.NODE_ENV === "production" ? "; Secure" : ""}`
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200${secure ? "; Secure" : ""}`
   );
   return response;
 }

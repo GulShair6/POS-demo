@@ -9,9 +9,11 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request origin" }, { status: 403 });
   }
   const response = Response.json({ ok: true });
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const secure = forwardedProto === "https" || (!forwardedProto && new URL(request.url).protocol === "https:");
   response.headers.append(
     "set-cookie",
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${process.env.NODE_ENV === "production" ? "; Secure" : ""}`
+    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? "; Secure" : ""}`
   );
   return response;
 }
